@@ -7,6 +7,3 @@ google-genai>=1.0.0
 streamlit>=1.40.0
 streamlit-quill>=0.0.3
 beautifulsoup4>=4.12.0
-marker-pdf>=1.10.0
-xhtml2pdf>=0.2.17
-markdown2>=2.5.0

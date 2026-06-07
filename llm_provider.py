@@ -1,22 +1,12 @@
 """Provider-neutral LLM layer.
 
-The Streamlit app supports two LLM back-ends behind one interface:
+Supports two back-ends behind one interface:
 
   * Google Gemini  (``GEMINI_API_KEY`` / ``GOOGLE_API_KEY``)
   * OpenAI GPT     (``OPENAI_API_KEY``)
 
-Every operation in the app — the Word chat agent, the Markdown chat agent,
-the PDF→Markdown conversion, and the checklist audit — talks to a
-``Provider`` instance instead of a vendor SDK directly, so the user can pick
-any model in the sidebar and have it drive all operations.
-
-Two capabilities are exposed:
-
-  * ``run_agent_loop`` — a function-calling (tool) loop.  History is kept in a
-    provider-neutral list of dicts so a conversation can survive switching the
-    selected model mid-session.
-  * ``generate_json``  — single-shot generation returning a JSON string, with
-    optional PDF input (multimodal) and an optional JSON schema hint.
+Exposes ``run_agent_loop`` — a function-calling (tool) loop where history is
+kept in a provider-neutral list so conversations survive model switches.
 
 Neutral history entries
 -----------------------
@@ -27,7 +17,6 @@ Neutral history entries
 
 from __future__ import annotations
 
-import base64
 import json
 import os
 from typing import Callable, Optional
@@ -64,7 +53,6 @@ def provider_name_for_model(model: str) -> str:
         return "openai"
     if m in (x.lower() for x in GEMINI_MODELS):
         return "gemini"
-    # Heuristic fallback for models not in the static lists.
     if m.startswith("gpt") or m.startswith("o1") or m.startswith("o3") or m.startswith("o4"):
         return "openai"
     return "gemini"
@@ -113,20 +101,6 @@ class Provider:
     def __init__(self, model: str):
         self.model = model
 
-    # -- single-shot JSON generation (optionally multimodal) ----------------
-    def generate_json(
-        self,
-        *,
-        prompt: str,
-        system: Optional[str] = None,
-        pdf_bytes: Optional[bytes] = None,
-        json_schema: Optional[dict] = None,
-        temperature: Optional[float] = None,
-        max_output_tokens: Optional[int] = None,
-    ) -> str:
-        raise NotImplementedError
-
-    # -- tool / function-calling loop ---------------------------------------
     def _chat(self, system: Optional[str], tools: list[dict], history: list[dict]):
         """Return ``(text, tool_calls)`` for one model turn.
 
@@ -146,7 +120,7 @@ class Provider:
     ) -> tuple[str, list[dict]]:
         """Drive the tool loop until the model stops requesting tools.
 
-        ``history`` is mutated in place (so it persists in session state).
+        ``history`` is mutated in place (persists in session state).
         ``dispatch(name, args)`` runs a tool and returns its string result.
         Returns ``(final_text, tool_log)``.
         """
@@ -172,12 +146,8 @@ class Provider:
             responses = []
             for call in tool_calls:
                 result = dispatch(call["name"], call["args"])
-                tool_log.append(
-                    {"name": call["name"], "args": call["args"], "result": result}
-                )
-                responses.append(
-                    {"id": call["id"], "name": call["name"], "content": result}
-                )
+                tool_log.append({"name": call["name"], "args": call["args"], "result": result})
+                responses.append({"id": call["id"], "name": call["name"], "content": result})
             history.append({"role": "tool_batch", "responses": responses})
 
         return final_text or "_(no reply)_", tool_log
@@ -192,12 +162,9 @@ class GeminiProvider(Provider):
 
     def __init__(self, api_key: str, model: str):
         super().__init__(model)
-        from google import genai  # lazy import — only when actually used
-
-        self._genai = genai
+        from google import genai
         self.client = genai.Client(api_key=api_key)
 
-    # --- conversions -------------------------------------------------------
     def _to_contents(self, history: list[dict]):
         from google.genai import types
 
@@ -241,9 +208,7 @@ class GeminiProvider(Provider):
             schema = _normalize_schema(t)
             if not schema.get("properties"):
                 declarations.append(
-                    types.FunctionDeclaration(
-                        name=t["name"], description=t.get("description", "")
-                    )
+                    types.FunctionDeclaration(name=t["name"], description=t.get("description", ""))
                 )
             else:
                 declarations.append(
@@ -255,7 +220,6 @@ class GeminiProvider(Provider):
                 )
         return types.Tool(function_declarations=declarations)
 
-    # --- API ---------------------------------------------------------------
     def _chat(self, system, tools, history):
         from google.genai import types
 
@@ -276,50 +240,12 @@ class GeminiProvider(Provider):
         for p in parts:
             fc = getattr(p, "function_call", None)
             if fc:
-                tool_calls.append(
-                    {
-                        "id": fc.name,
-                        "name": fc.name,
-                        "args": dict(fc.args) if fc.args else {},
-                    }
-                )
+                tool_calls.append({
+                    "id": fc.name,
+                    "name": fc.name,
+                    "args": dict(fc.args) if fc.args else {},
+                })
         return text, tool_calls
-
-    def generate_json(
-        self,
-        *,
-        prompt,
-        system=None,
-        pdf_bytes=None,
-        json_schema=None,
-        temperature=None,
-        max_output_tokens=None,
-    ) -> str:
-        from google.genai import types
-
-        parts = []
-        if pdf_bytes is not None:
-            parts.append(
-                types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
-            )
-        parts.append(prompt)
-
-        config_kwargs: dict = {"response_mime_type": "application/json"}
-        if system:
-            config_kwargs["system_instruction"] = system
-        if json_schema:
-            config_kwargs["response_schema"] = json_schema
-        if temperature is not None:
-            config_kwargs["temperature"] = temperature
-        if max_output_tokens is not None:
-            config_kwargs["max_output_tokens"] = max_output_tokens
-
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=parts,
-            config=types.GenerateContentConfig(**config_kwargs),
-        )
-        return (response.text or "").strip()
 
 
 # ---------------------------------------------------------------------------
@@ -331,8 +257,7 @@ class OpenAIProvider(Provider):
 
     def __init__(self, api_key: str, model: str):
         super().__init__(model)
-        from openai import OpenAI  # lazy import — only when actually used
-
+        from openai import OpenAI
         self.client = OpenAI(api_key=api_key)
 
     @property
@@ -340,7 +265,6 @@ class OpenAIProvider(Provider):
         m = self.model.lower()
         return m.startswith("o1") or m.startswith("o3") or m.startswith("o4") or m.startswith("gpt-5")
 
-    # --- conversions -------------------------------------------------------
     def _to_messages(self, system, history: list[dict]) -> list[dict]:
         msgs: list[dict] = []
         if system:
@@ -366,31 +290,26 @@ class OpenAIProvider(Provider):
                 msgs.append(entry)
             elif role == "tool_batch":
                 for r in m["responses"]:
-                    msgs.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": r["id"],
-                            "content": r["content"],
-                        }
-                    )
+                    msgs.append({
+                        "role": "tool",
+                        "tool_call_id": r["id"],
+                        "content": r["content"],
+                    })
         return msgs
 
     def _to_tools(self, tools: list[dict]) -> list[dict]:
-        out = []
-        for t in tools:
-            out.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": t["name"],
-                        "description": t.get("description", ""),
-                        "parameters": _normalize_schema(t),
-                    },
-                }
-            )
-        return out
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t.get("description", ""),
+                    "parameters": _normalize_schema(t),
+                },
+            }
+            for t in tools
+        ]
 
-    # --- API ---------------------------------------------------------------
     def _chat(self, system, tools, history):
         response = self.client.chat.completions.create(
             model=self.model,
@@ -407,46 +326,6 @@ class OpenAIProvider(Provider):
                 args = {}
             tool_calls.append({"id": tc.id, "name": tc.function.name, "args": args})
         return text, tool_calls
-
-    def generate_json(
-        self,
-        *,
-        prompt,
-        system=None,
-        pdf_bytes=None,
-        json_schema=None,
-        temperature=None,
-        max_output_tokens=None,
-    ) -> str:
-        content: list[dict] = [{"type": "text", "text": prompt}]
-        if pdf_bytes is not None:
-            b64 = base64.b64encode(pdf_bytes).decode("ascii")
-            content.append(
-                {
-                    "type": "file",
-                    "file": {
-                        "filename": "document.pdf",
-                        "file_data": f"data:application/pdf;base64,{b64}",
-                    },
-                }
-            )
-
-        messages: list[dict] = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": content})
-
-        kwargs: dict = {
-            "model": self.model,
-            "messages": messages,
-            "response_format": {"type": "json_object"},
-        }
-        # Reasoning models reject custom temperature; only set it elsewhere.
-        if temperature is not None and not self._is_reasoning_model:
-            kwargs["temperature"] = temperature
-
-        response = self.client.chat.completions.create(**kwargs)
-        return (response.choices[0].message.content or "").strip()
 
 
 # ---------------------------------------------------------------------------
