@@ -215,17 +215,14 @@ def _doc_text(editor: DocEditor) -> str:
     return "\n".join(lines) or "(empty document)"
 
 
-def run_llm_audit(client, model: str, editor: DocEditor, items: list[dict]) -> list[Result]:
-    """Run the content-style checks via one Gemini call. Returns one Result per item.
+def run_llm_audit(provider, editor: DocEditor, items: list[dict]) -> list[Result]:
+    """Run the content-style checks via one LLM call. Returns one Result per item.
 
-    `client` is a google.genai Client. We import google.genai lazily so the
-    structural-only path doesn't need it.
+    `provider` is an ``llm_provider.Provider`` (Gemini or OpenAI).
     """
     content_items = [it for it in items if it.get("kind") == "content"]
     if not content_items:
         return []
-
-    from google.genai import types  # local import keeps top-level deps light
 
     payload = [{"id": it["id"], "label": it["label"]} for it in content_items]
     prompt = LLM_AUDIT_PROMPT % {
@@ -233,15 +230,7 @@ def run_llm_audit(client, model: str, editor: DocEditor, items: list[dict]) -> l
         "items_json": json.dumps(payload, indent=2, ensure_ascii=False),
     }
 
-    response = client.models.generate_content(
-        model=model,
-        contents=[types.Content(role="user", parts=[types.Part(text=prompt)])],
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-        ),
-    )
-
-    raw = (response.text or "").strip()
+    raw = provider.generate_json(prompt=prompt)
     parsed: dict
     try:
         parsed = json.loads(raw)
@@ -264,11 +253,11 @@ def run_llm_audit(client, model: str, editor: DocEditor, items: list[dict]) -> l
     return out
 
 
-def run_all(client, model: str, editor: DocEditor, items: list[dict]) -> list[Result]:
-    """Convenience: structural first, then LLM (if a client is given)."""
+def run_all(provider, editor: DocEditor, items: list[dict]) -> list[Result]:
+    """Convenience: structural first, then LLM (if a provider is given)."""
     results = run_structural(editor, items)
-    if client is not None:
-        results.extend(run_llm_audit(client, model, editor, items))
+    if provider is not None:
+        results.extend(run_llm_audit(provider, editor, items))
     # Re-order to match the user's checklist order.
     order = {it["id"]: i for i, it in enumerate(items)}
     results.sort(key=lambda r: order.get(r.id, 9999))

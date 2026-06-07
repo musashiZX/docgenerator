@@ -13,12 +13,26 @@ from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
 
-from doc_editor import DocEditor, dispatch, doc_to_html, html_to_doc
-from doc_editor_gemini import GEMINI_TOOL, SYSTEM_PROMPT
+from doc_editor import DocEditor, dispatch, doc_to_html, html_to_doc, TOOLS as DOC_TOOLS
+from doc_editor_gemini import SYSTEM_PROMPT
+from pdf_to_markdown import (
+    MD_SYSTEM_PROMPT,
+    MD_TOOLS,
+    convert_markdown_to_pdf,
+    convert_pdf_to_markdown,
+    get_pipeline_step_paths,
+    md_dispatch,
+    read_markdown,
+    write_markdown,
+)
 import checklist as cl
+from llm_provider import (
+    ALL_MODELS,
+    get_provider,
+    missing_key_message,
+    provider_name_for_model,
+)
 from app_logger import get_logger, truncate
 
 log = get_logger()
@@ -36,13 +50,17 @@ st.set_page_config(page_title="Word Doc Agent", page_icon="📝", layout="wide")
 DEFAULT_MODEL = "gemini-2.5-flash"
 DOC_DIR = Path(__file__).parent / "docs"
 DOC_DIR.mkdir(exist_ok=True)
+PDF_DIR = Path(__file__).parent / "pdfs"
+PDF_DIR.mkdir(exist_ok=True)
+MD_DIR = Path(__file__).parent / "markdown"
+MD_DIR.mkdir(exist_ok=True)
 
 
 # -------- session state --------
 
 def reset_chat():
     st.session_state.messages = []  # display log: list of {role, text, tool_calls?}
-    st.session_state.history = []   # genai Content list
+    st.session_state.history = []   # provider-neutral history (see llm_provider)
 
 
 for key, default in [
@@ -53,6 +71,10 @@ for key, default in [
     ("last_saved", None),
     ("checklist_results", None),  # list[dict] or None
     ("checklist_sig", None),       # doc signature when results were taken
+    ("md_path", None),             # currently-open markdown file (Path)
+    ("pdf_pending", None),         # dict {name, bytes} waiting for Transform click
+    ("md_messages", []),           # display log for the markdown chat
+    ("md_history", []),            # provider-neutral history for the markdown chat
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -80,11 +102,13 @@ def doc_signature(path: Path) -> str:
 
 # -------- helpers --------
 
-def get_client() -> genai.Client | None:
-    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        return None
-    return genai.Client(api_key=api_key)
+def get_active_provider():
+    """Build the LLM provider for the model currently selected in the sidebar."""
+    return get_provider(st.session_state.model)
+
+
+def key_error_message() -> str:
+    return missing_key_message(st.session_state.model)
 
 
 PAGE_CSS = """
@@ -224,58 +248,57 @@ def render_doc_html(path: Path) -> str:
 </body></html>"""
 
 
-def run_agent(client: genai.Client, model: str, editor: DocEditor, user_text: str):
-    """Run one agent turn (model + tool loop). Yields display events."""
+def run_agent(provider, editor: DocEditor, user_text: str):
+    """Run one agent turn (model + tool loop) against the Word document."""
     history = st.session_state.history
-    history.append(types.Content(role="user", parts=[types.Part(text=user_text)]))
-
-    config = types.GenerateContentConfig(
-        system_instruction=SYSTEM_PROMPT,
-        tools=[GEMINI_TOOL],
-    )
-
-    final_text = ""
-    tool_log: list[dict] = []
 
     log.info("AGENT START | model=%s | doc=%s | prompt=%r",
-             model, editor.path.name, truncate(user_text, 300))
+             provider.model, editor.path.name, truncate(user_text, 300))
 
-    for step in range(20):
-        response = client.models.generate_content(
-            model=model,
-            contents=history,
-            config=config,
-        )
-        candidate = response.candidates[0]
-        parts = candidate.content.parts or []
-        history.append(candidate.content)
+    def _dispatch(name: str, args: dict) -> str:
+        result = dispatch(editor, name, args)
+        log.info("TOOL CALL | %s(%s) -> %s",
+                 name, truncate(json.dumps(args, default=str), 200),
+                 truncate(result, 200))
+        return result
 
-        function_calls = [p.function_call for p in parts if p.function_call]
-        text_chunks = [p.text for p in parts if getattr(p, "text", None)]
-        if text_chunks:
-            final_text += "".join(text_chunks)
+    final_text, tool_log = provider.run_agent_loop(
+        system=SYSTEM_PROMPT,
+        tools=DOC_TOOLS,
+        history=history,
+        user_text=user_text,
+        dispatch=_dispatch,
+    )
+    log.info("AGENT END | reply=%r", truncate(final_text, 300))
+    return final_text, tool_log
 
-        if not function_calls:
-            log.info("AGENT END | step=%d | reply=%r", step, truncate(final_text, 300))
-            break
 
-        function_response_parts = []
-        for call in function_calls:
-            args = dict(call.args) if call.args else {}
-            result = dispatch(editor, call.name, args)
-            log.info("TOOL CALL | %s(%s) -> %s",
-                     call.name, truncate(json.dumps(args, default=str), 200),
-                     truncate(result, 200))
-            tool_log.append({"name": call.name, "args": args, "result": result})
-            function_response_parts.append(
-                types.Part.from_function_response(
-                    name=call.name,
-                    response={"result": result},
-                )
-            )
-        history.append(types.Content(role="user", parts=function_response_parts))
+def run_md_agent(provider, md_path: Path, user_text: str):
+    """Run one agent turn against the markdown file."""
+    history = st.session_state.md_history
 
-    return final_text or "_(no reply)_", tool_log
+    log.info("MD AGENT START | model=%s | md=%s | prompt=%r",
+             provider.model, md_path.name, truncate(user_text, 300))
+
+    def _dispatch(name: str, args: dict) -> str:
+        result = md_dispatch(md_path, name, args)
+        log.info("MD TOOL CALL | %s(%s) -> %s",
+                 name, truncate(json.dumps(args, default=str), 200),
+                 truncate(result, 200))
+        return result
+
+    final_text, tool_log = provider.run_agent_loop(
+        system=MD_SYSTEM_PROMPT,
+        tools=MD_TOOLS,
+        history=history,
+        user_text=user_text,
+        dispatch=_dispatch,
+    )
+    # Keep the displayed tool results compact.
+    for entry in tool_log:
+        entry["result"] = truncate(entry["result"], 400)
+    log.info("MD AGENT END | reply=%r", truncate(final_text, 300))
+    return final_text, tool_log
 
 
 # -------- sidebar --------
@@ -283,8 +306,10 @@ def run_agent(client: genai.Client, model: str, editor: DocEditor, user_text: st
 with st.sidebar:
     st.title("📝 Word Doc Agent")
 
-    if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
-        st.error("GEMINI_API_KEY not set in .env")
+    has_gemini = bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
+    has_openai = bool(os.environ.get("OPENAI_API_KEY"))
+    if not has_gemini and not has_openai:
+        st.error("No API key set in .env (need GEMINI_API_KEY or OPENAI_API_KEY).")
 
     st.subheader("Document")
 
@@ -343,19 +368,137 @@ with st.sidebar:
                 use_container_width=True,
             )
 
-    st.subheader("Model")
-    st.session_state.model = st.selectbox(
-        "Gemini model",
-        [
-            "gemini-2.5-flash",
-            "gemini-2.5-pro",
-            "gemini-2.5-flash-lite",
-            "gemini-2.0-flash",
-            "gemini-flash-latest",
-            "gemini-pro-latest",
-        ],
-        index=0,
+    st.subheader("PDF → Markdown")
+    pdf_uploaded = st.file_uploader(
+        "Upload a .pdf",
+        type=["pdf"],
+        key="pdf_uploader",
+        help="Click 'Transform PDF → Markdown' below to convert. The markdown is saved into the markdown/ folder.",
     )
+    if pdf_uploaded is not None:
+        st.session_state.pdf_pending = {
+            "name": pdf_uploaded.name,
+            "bytes": pdf_uploaded.getvalue(),
+        }
+        st.caption(f"Ready: `{pdf_uploaded.name}` ({len(st.session_state.pdf_pending['bytes'])} bytes)")
+
+    transform_disabled = st.session_state.pdf_pending is None
+    if st.button(
+        "✨ Transform PDF → Markdown",
+        use_container_width=True,
+        disabled=transform_disabled,
+        type="primary",
+    ):
+        provider = get_active_provider()
+        if provider is None:
+            st.error(key_error_message())
+        else:
+            pending = st.session_state.pdf_pending
+            with st.spinner(
+                f"Converting `{pending['name']}` …  "
+                "(Step 1: Marker extraction · Step 2: Gemini color enrichment)"
+            ):
+                try:
+                    # Step 0 — persist the original PDF for traceability.
+                    pdf_target = PDF_DIR / pending["name"]
+                    stem, suffix = pdf_target.stem, pdf_target.suffix or ".pdf"
+                    n = 1
+                    while pdf_target.exists():
+                        pdf_target = PDF_DIR / f"{stem} ({n}){suffix}"
+                        n += 1
+                    pdf_target.write_bytes(pending["bytes"])
+                    log.info(
+                        "PDF→MD | STEP 0 | original PDF saved as %s (%d bytes)",
+                        pdf_target.name,
+                        len(pending["bytes"]),
+                    )
+
+                    result = convert_pdf_to_markdown(
+                        provider,
+                        pending["bytes"],
+                        pending["name"],
+                        MD_DIR,
+                    )
+
+                    steps_saved = []
+                    if result.step1_marker_path:
+                        steps_saved.append(f"`{result.step1_marker_path.name}`")
+                    if result.step2_enriched_path:
+                        steps_saved.append(f"`{result.step2_enriched_path.name}`")
+
+                    st.session_state.md_path = result.markdown_path
+                    st.session_state.md_messages = []
+                    st.session_state.md_history = []
+                    st.session_state.pdf_pending = None
+
+                    step_note = (
+                        f"  \nPipeline steps saved: {', '.join(steps_saved)}"
+                        if steps_saved
+                        else ""
+                    )
+                    st.success(
+                        f"Saved `{result.markdown_path.name}` and "
+                        f"`{result.json_path.name}` in `markdown/`."
+                        + step_note
+                    )
+                    st.rerun()
+                except Exception as e:  # noqa: BLE001
+                    log.exception("PDF→MD FAILED | %s", e)
+                    st.error(f"Conversion failed: {e}")
+
+    md_files = sorted(p.name for p in MD_DIR.glob("*.md"))
+    if md_files:
+        current_md = st.session_state.md_path.name if st.session_state.md_path else None
+        idx = md_files.index(current_md) if current_md in md_files else 0
+        md_choice = st.selectbox("Open markdown", md_files, index=idx, key="md_choice")
+        chosen = MD_DIR / md_choice
+        if st.session_state.md_path != chosen:
+            st.session_state.md_path = chosen
+            st.session_state.md_messages = []
+            st.session_state.md_history = []
+            st.rerun()
+
+        with open(chosen, "rb") as f:
+            st.download_button(
+                "⬇️ Download .md",
+                f.read(),
+                file_name=chosen.name,
+                mime="text/markdown",
+                use_container_width=True,
+                key=f"dl-md::{chosen.name}",
+            )
+
+        if st.button("📄 Export to PDF", use_container_width=True, key=f"export-pdf::{chosen.name}"):
+            with st.spinner("Generating PDF …"):
+                try:
+                    pdf_out = chosen.with_suffix(".pdf")
+                    convert_markdown_to_pdf(chosen, pdf_out)
+                    log.info("EXPORT PDF | %s → %s", chosen.name, pdf_out.name)
+                    with open(pdf_out, "rb") as fp:
+                        st.download_button(
+                            "⬇️ Download PDF",
+                            fp.read(),
+                            file_name=pdf_out.name,
+                            mime="application/pdf",
+                            use_container_width=True,
+                            key=f"dl-pdf::{pdf_out.name}",
+                        )
+                except Exception as e:  # noqa: BLE001
+                    log.exception("EXPORT PDF FAILED | %s", e)
+                    st.error(f"PDF export failed: {e}")
+
+    st.subheader("Model")
+    default_idx = ALL_MODELS.index(st.session_state.model) if st.session_state.model in ALL_MODELS else 0
+    st.session_state.model = st.selectbox(
+        "Model (Gemini or OpenAI GPT)",
+        ALL_MODELS,
+        index=default_idx,
+    )
+    _active = provider_name_for_model(st.session_state.model)
+    if _active == "openai" and not has_openai:
+        st.warning("Selected an OpenAI model but OPENAI_API_KEY is not set in .env.")
+    elif _active == "gemini" and not has_gemini:
+        st.warning("Selected a Gemini model but GEMINI_API_KEY is not set in .env.")
 
     if st.button("🗑️ Clear chat history", use_container_width=True):
         reset_chat()
@@ -364,8 +507,147 @@ with st.sidebar:
 
 # -------- main panel --------
 
-if not st.session_state.doc_path:
-    st.info("Pick or create a `.docx` file in the sidebar to get started.")
+if not st.session_state.doc_path and not st.session_state.md_path:
+    st.info(
+        "Pick or create a `.docx` file in the sidebar, "
+        "or upload a PDF and click **Transform PDF → Markdown** to get started."
+    )
+    st.stop()
+
+# Mode selector: only shown if both kinds of files exist in this session.
+mode_options = []
+if st.session_state.doc_path:
+    mode_options.append("Word document")
+if st.session_state.md_path:
+    mode_options.append("Markdown")
+
+if len(mode_options) > 1:
+    mode = st.radio(
+        "Working on",
+        mode_options,
+        horizontal=True,
+        key="active_mode",
+    )
+else:
+    mode = mode_options[0]
+
+if mode == "Markdown":
+    md_path: Path = st.session_state.md_path
+    json_path = md_path.with_suffix(".json")
+
+    left, right = st.columns([2, 3])
+
+    with right:
+        st.subheader(f"Markdown — `{md_path.name}`")
+        tab_edit, tab_preview, tab_steps, tab_json = st.tabs(
+            ["Edit", "Preview", "Pipeline Steps", "JSON"]
+        )
+
+        current_text = read_markdown(md_path)
+
+        with tab_edit:
+            edited = st.text_area(
+                "markdown source",
+                value=current_text,
+                height=600,
+                key=f"md-edit::{md_path.name}",
+                label_visibility="collapsed",
+            )
+            cols = st.columns([1, 1, 3])
+            if cols[0].button("💾 Save", use_container_width=True, key=f"md-save::{md_path.name}"):
+                write_markdown(md_path, edited)
+                log.info("MANUAL SAVE | markdown | md=%s", md_path.name)
+                st.success("Saved.")
+                st.rerun()
+
+        with tab_preview:
+            st.markdown(current_text, unsafe_allow_html=True)
+
+        with tab_steps:
+            st.caption(
+                "Intermediate files saved at each pipeline step. "
+                "Only available for files converted with the Marker + Gemini pipeline."
+            )
+            step_paths = get_pipeline_step_paths(md_path)
+
+            step_labels = {
+                "step1_marker": "Step 1 — Marker extraction (raw)",
+                "step2_enriched": "Step 2 — Gemini color enrichment",
+                "step1_fallback": "Step 1 — Gemini-only fallback",
+            }
+            found_any = False
+            for key, label in step_labels.items():
+                path = step_paths.get(key)
+                if path:
+                    found_any = True
+                    with st.expander(f"📄 {label}  (`{path.name}`)"):
+                        step_text = path.read_text(encoding="utf-8")
+                        st.text_area(
+                            label,
+                            value=step_text,
+                            height=400,
+                            key=f"step-view::{path.name}",
+                            label_visibility="collapsed",
+                            disabled=True,
+                        )
+                        with open(path, "rb") as sf:
+                            st.download_button(
+                                f"⬇️ Download {path.name}",
+                                sf.read(),
+                                file_name=path.name,
+                                mime="text/markdown",
+                                use_container_width=True,
+                                key=f"dl-step::{path.name}",
+                            )
+            if not found_any:
+                st.info(
+                    "No pipeline step files found for this document. "
+                    "Re-convert the PDF to generate them."
+                )
+
+        with tab_json:
+            if json_path.exists():
+                st.code(json_path.read_text(encoding="utf-8"), language="json")
+            else:
+                st.info("No matching JSON sidecar found.")
+
+    with left:
+        st.subheader("Chat")
+        md_chat_box = st.container(height=500)
+        with md_chat_box:
+            for msg in st.session_state.md_messages:
+                with st.chat_message(msg["role"]):
+                    if msg.get("tool_calls"):
+                        with st.expander(f"🔧 {len(msg['tool_calls'])} tool call(s)"):
+                            for call in msg["tool_calls"]:
+                                st.code(
+                                    f"{call['name']}({json.dumps(call['args'], default=str)})\n"
+                                    f"-> {call['result']}",
+                                    language="text",
+                                )
+                    if msg.get("text"):
+                        st.markdown(msg["text"])
+
+        prompt = st.chat_input("Tell the agent what to edit in the markdown…")
+        if prompt:
+            provider = get_active_provider()
+            if provider is None:
+                st.error(key_error_message())
+                st.stop()
+            st.session_state.md_messages.append({"role": "user", "text": prompt})
+            with st.spinner("Thinking…"):
+                try:
+                    reply, tool_log = run_md_agent(provider, md_path, prompt)
+                    st.session_state.md_messages.append(
+                        {"role": "assistant", "text": reply, "tool_calls": tool_log}
+                    )
+                except Exception as e:  # noqa: BLE001
+                    log.exception("MD AGENT FAILED | md=%s | %s", md_path.name, e)
+                    st.session_state.md_messages.append(
+                        {"role": "assistant", "text": f"⚠️ Error: {e}"}
+                    )
+            st.rerun()
+
     st.stop()
 
 left, right = st.columns([2, 3])
@@ -515,13 +797,13 @@ with right:
 
         if run_clicked or run_struct_only:
             editor_doc = DocEditor(st.session_state.doc_path)
-            client = None if run_struct_only else get_client()
+            provider = None if run_struct_only else get_active_provider()
             mode = "structural-only" if run_struct_only else "structural+llm"
             log.info("CHECKLIST RUN | mode=%s | doc=%s | items=%d",
                      mode, editor_doc.path.name, len(items))
             with st.spinner("Running checks…"):
                 try:
-                    results = cl.run_all(client, st.session_state.model, editor_doc, items)
+                    results = cl.run_all(provider, editor_doc, items)
                     st.session_state.checklist_results = [cl.result_to_dict(r) for r in results]
                     st.session_state.checklist_sig = sig
                     passed = sum(1 for r in results if r.passed is True)
@@ -641,9 +923,9 @@ with left:
 
     prompt = st.chat_input("Tell the agent what to edit…")
     if prompt:
-        client = get_client()
-        if client is None:
-            st.error("Set GEMINI_API_KEY in .env first.")
+        provider = get_active_provider()
+        if provider is None:
+            st.error(key_error_message())
             st.stop()
 
         st.session_state.messages.append({"role": "user", "text": prompt})
@@ -651,7 +933,7 @@ with left:
         editor = DocEditor(st.session_state.doc_path)
         with st.spinner("Thinking…"):
             try:
-                reply, tool_log = run_agent(client, st.session_state.model, editor, prompt)
+                reply, tool_log = run_agent(provider, editor, prompt)
                 st.session_state.messages.append(
                     {"role": "assistant", "text": reply, "tool_calls": tool_log}
                 )
