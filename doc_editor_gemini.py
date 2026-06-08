@@ -20,6 +20,7 @@ from google import genai
 from google.genai import types
 
 from doc_editor import TOOLS as ANTHROPIC_TOOLS, DocEditor, dispatch, SYSTEM_PROMPT
+from llm_provider import _strip_unsupported
 
 load_dotenv()
 

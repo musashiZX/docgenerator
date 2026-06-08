@@ -54,9 +54,19 @@ question before writing — pick whichever is faster for the user.
 - Match the existing document's tone, language, and formatting.
 - Never leave "[add details here]" placeholders in content you wrote yourself.
 
+TABLES
+- `read_document` shows tables as [TABLE t_index] with every row's cell contents.
+- To inspect a table in detail use `read_table(table_index)` — it shows every \
+  cell as [row][col]: "text".
+- To edit a single cell use `set_table_cell(table_index, row, col, text)`.
+- To change the same text wherever it appears (including inside tables) use \
+  `replace_text` — this is the fastest option when you know the exact string.
+- Paragraph tools (set_paragraph, insert_paragraph, etc.) operate on non-table \
+  paragraphs only; never use a paragraph index to target a table cell.
+
 OUTPUT
 - After editing, give a SHORT (1–3 sentence) summary of what changed AND where \
-(which section, which paragraph indices).
+(which section / table / paragraph indices).
 - Available paragraph styles: 'Normal', 'Title', 'Heading 1', 'Heading 2', \
 'Heading 3', 'List Bullet', 'List Number', 'Quote'.
 """
@@ -64,12 +74,17 @@ OUTPUT
 TOOLS = [
     {
         "name": "read_document",
-        "description": "Read the full document. Returns each paragraph with its 0-based index and style.",
+        "description": (
+            "Read the full document structure in order. "
+            "Paragraphs are shown as [p_index] (style) text. "
+            "Tables are shown as [TABLE t_index] followed by each row's cell texts. "
+            "Use p_index with paragraph tools and t_index with table tools."
+        ),
         "input_schema": {"type": "object", "properties": {}},
     },
     {
         "name": "append_paragraph",
-        "description": "Append a paragraph to the end of the document.",
+        "description": "Append a new paragraph at the end of the document body (outside any table).",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -81,7 +96,7 @@ TOOLS = [
     },
     {
         "name": "insert_paragraph",
-        "description": "Insert a new paragraph before the paragraph at `index`.",
+        "description": "Insert a new paragraph before the paragraph at `index` (0-based, outside tables).",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -94,7 +109,7 @@ TOOLS = [
     },
     {
         "name": "set_paragraph",
-        "description": "Replace the full text (and optionally the style) of the paragraph at `index`.",
+        "description": "Replace the full text (and optionally the style) of the paragraph at `index` (outside tables).",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -107,7 +122,7 @@ TOOLS = [
     },
     {
         "name": "delete_paragraph",
-        "description": "Delete the paragraph at `index`. Later paragraphs shift up by one.",
+        "description": "Delete the paragraph at `index` (outside tables). Later paragraphs shift up by one.",
         "input_schema": {
             "type": "object",
             "properties": {"index": {"type": "integer"}},
@@ -116,7 +131,11 @@ TOOLS = [
     },
     {
         "name": "replace_text",
-        "description": "Find-and-replace across the whole document. Returns the number of replacements made.",
+        "description": (
+            "Find-and-replace a string across the ENTIRE document — "
+            "including inside table cells. Returns the number of replacements made. "
+            "Prefer this tool when you know the exact text to change."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -124,6 +143,37 @@ TOOLS = [
                 "replace": {"type": "string"},
             },
             "required": ["find", "replace"],
+        },
+    },
+    {
+        "name": "read_table",
+        "description": (
+            "Return the full contents of a specific table with row and column indices. "
+            "Use this before calling set_table_cell to confirm the exact cell coordinates."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "table_index": {"type": "integer", "description": "0-based table index from read_document"},
+            },
+            "required": ["table_index"],
+        },
+    },
+    {
+        "name": "set_table_cell",
+        "description": (
+            "Replace the text of a single table cell identified by table_index, row, and col (all 0-based). "
+            "Call read_table first to confirm the correct coordinates."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "table_index": {"type": "integer"},
+                "row":         {"type": "integer"},
+                "col":         {"type": "integer"},
+                "text":        {"type": "string"},
+            },
+            "required": ["table_index", "row", "col", "text"],
         },
     },
 ]
@@ -155,15 +205,52 @@ class DocEditor:
         except KeyError:
             return f"(warning: style '{style}' not found, using default)"
 
+    # --- helpers for table iteration ---
+
+    def _body_blocks(self):
+        """Yield (kind, obj) for each top-level block in document order.
+
+        kind == 'paragraph' → obj is a Paragraph
+        kind == 'table'     → obj is a Table
+        """
+        from docx.oxml.ns import qn
+        from docx.table import Table
+        from docx.text.paragraph import Paragraph
+
+        for child in self.doc.element.body:
+            tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+            if tag == "p":
+                yield "paragraph", Paragraph(child, self.doc)
+            elif tag == "tbl":
+                yield "table", Table(child, self.doc)
+
     # --- tool implementations ---
 
     def read_document(self) -> str:
-        if not self.doc.paragraphs:
-            return "(empty document)"
+        """Return full document structure: paragraphs with indices, tables with cell content."""
         lines = []
-        for i, p in enumerate(self.doc.paragraphs):
-            style = p.style.name if p.style else "Normal"
-            lines.append(f"[{i}] ({style}) {p.text}")
+        p_idx = 0
+        t_idx = 0
+        has_content = False
+
+        for kind, obj in self._body_blocks():
+            has_content = True
+            if kind == "paragraph":
+                style = obj.style.name if obj.style else "Normal"
+                lines.append(f"[{p_idx}] ({style}) {obj.text}")
+                p_idx += 1
+            else:
+                # Table — show every cell so the agent can see and edit all content.
+                rows = obj.rows
+                n_cols = len(obj.columns) if rows else 0
+                lines.append(f"[TABLE {t_idx}] ({len(rows)} rows × {n_cols} cols)")
+                for r, row in enumerate(rows):
+                    cells = [c.text.replace("\n", " / ") for c in row.cells]
+                    lines.append(f"  row {r}: {cells}")
+                t_idx += 1
+
+        if not has_content:
+            return "(empty document)"
         return "\n".join(lines)
 
     def append_paragraph(self, text: str, style: str | None = None) -> str:
@@ -205,20 +292,108 @@ class DocEditor:
         self.save()
         return f"Deleted paragraph at index {index}."
 
+    @staticmethod
+    def _replace_in_para(p, find: str, replace: str) -> int:
+        """Replace text within a paragraph while preserving run-level formatting.
+
+        Strategy:
+        1. Try run-level replacement first — this preserves bold, italic, color,
+           font size, etc. on every run that contains the target text entirely
+           within one run.
+        2. Fall back to a whole-paragraph rebuild only when the target string
+           spans multiple runs (rare, but possible when Word splits text
+           arbitrarily). In that case formatting IS lost, which is the same
+           behaviour as before — still better than silently missing the match.
+        """
+        if find not in p.text:
+            return 0
+
+        # --- pass 1: run-level (format-preserving) ---
+        count = 0
+        for run in p.runs:
+            if find in run.text:
+                count += run.text.count(find)
+                run.text = run.text.replace(find, replace)
+
+        # --- pass 2: cross-run fallback (format-lossy, but correct) ---
+        # Re-read p.text after pass 1; if find still appears it crosses run
+        # boundaries and we have no choice but to rebuild the paragraph.
+        if find in p.text:
+            remaining = p.text.count(find)
+            count += remaining
+            new_text = p.text.replace(find, replace)
+            for run in list(p.runs):
+                run._element.getparent().remove(run._element)
+            p.add_run(new_text)
+
+        return count
+
     def replace_text(self, find: str, replace: str) -> str:
         if not find:
             return "Error: 'find' must be non-empty."
         count = 0
-        for p in self.doc.paragraphs:
-            if find not in p.text:
-                continue
-            new_text = p.text.replace(find, replace)
-            count += p.text.count(find)
-            self._clear_runs(p)
-            p.add_run(new_text)
+
+        for kind, obj in self._body_blocks():
+            if kind == "paragraph":
+                count += self._replace_in_para(obj, find, replace)
+            else:
+                for row in obj.rows:
+                    for cell in row.cells:
+                        for p in cell.paragraphs:
+                            count += self._replace_in_para(p, find, replace)
+
         if count:
             self.save()
         return f"Replaced {count} occurrence(s) of {find!r}."
+
+    def read_table(self, table_index: int) -> str:
+        """Return detailed cell-by-cell content of a specific table."""
+        tables = self.doc.tables
+        if not tables:
+            return "This document contains no tables."
+        if table_index < 0 or table_index >= len(tables):
+            return f"Error: table_index {table_index} out of range (0..{len(tables) - 1})."
+        table = tables[table_index]
+        lines = [f"Table {table_index}: {len(table.rows)} rows × {len(table.columns)} cols"]
+        for r, row in enumerate(table.rows):
+            for c, cell in enumerate(row.cells):
+                cell_text = cell.text.replace("\n", " / ")
+                lines.append(f"  [{r}][{c}]: {cell_text!r}")
+        return "\n".join(lines)
+
+    def set_table_cell(self, table_index: int, row: int, col: int, text: str) -> str:
+        """Replace the text of one table cell, preserving the cell's paragraph style."""
+        tables = self.doc.tables
+        if not tables:
+            return "This document contains no tables."
+        if table_index < 0 or table_index >= len(tables):
+            return f"Error: table_index {table_index} out of range (0..{len(tables) - 1})."
+        table = tables[table_index]
+        if row < 0 or row >= len(table.rows):
+            return f"Error: row {row} out of range (0..{len(table.rows) - 1})."
+        row_cells = table.rows[row].cells
+        if col < 0 or col >= len(row_cells):
+            return f"Error: col {col} out of range (0..{len(row_cells) - 1})."
+        cell = row_cells[col]
+        paras = cell.paragraphs
+        if paras:
+            p = paras[0]
+            # Preserve the first run's character formatting (bold, font, size…)
+            # by writing into its text property rather than clearing all runs.
+            if p.runs:
+                p.runs[0].text = text
+                # Remove any additional runs so there's no leftover text.
+                for extra_run in p.runs[1:]:
+                    extra_run._element.getparent().remove(extra_run._element)
+            else:
+                p.add_run(text)
+            # Remove any extra paragraphs inside the cell.
+            for extra in paras[1:]:
+                extra._element.getparent().remove(extra._element)
+        else:
+            cell.add_paragraph(text)
+        self.save()
+        return f"Updated table[{table_index}] row {row} col {col} → {text!r}."
 
 
 # ---------- HTML round-trip (used by the manual editor in the Streamlit UI) ----------

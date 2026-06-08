@@ -108,6 +108,10 @@ class Provider:
         """
         raise NotImplementedError
 
+    def complete(self, system: Optional[str], user_text: str) -> str:
+        """Single-shot text completion with no tools. Returns the model's reply."""
+        raise NotImplementedError
+
     def run_agent_loop(
         self,
         *,
@@ -247,6 +251,19 @@ class GeminiProvider(Provider):
                 })
         return text, tool_calls
 
+    def complete(self, system: Optional[str], user_text: str) -> str:
+        from google.genai import types
+
+        config = types.GenerateContentConfig(system_instruction=system)
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=[types.Content(role="user", parts=[types.Part(text=user_text)])],
+            config=config,
+        )
+        candidate = response.candidates[0]
+        parts = candidate.content.parts or []
+        return "".join(p.text for p in parts if getattr(p, "text", None))
+
 
 # ---------------------------------------------------------------------------
 # OpenAI provider
@@ -326,6 +343,17 @@ class OpenAIProvider(Provider):
                 args = {}
             tool_calls.append({"id": tc.id, "name": tc.function.name, "args": args})
         return text, tool_calls
+
+    def complete(self, system: Optional[str], user_text: str) -> str:
+        msgs: list[dict] = []
+        if system:
+            msgs.append({"role": "system", "content": system})
+        msgs.append({"role": "user", "content": user_text})
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=msgs,
+        )
+        return response.choices[0].message.content or ""
 
 
 # ---------------------------------------------------------------------------
