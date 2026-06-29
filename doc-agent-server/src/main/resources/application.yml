@@ -1,0 +1,31 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  config:
+    # Load repo-root .env when present (properties format: KEY=value)
+    import: optional:file:../.env[.properties],optional:file:.env[.properties]
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+
+app:
+  # Folder database: doc-agent-server/docs/*.docx (+ docs/.meta/*.json sidecars)
+  docs-dir: docs
+  # Loaded from repo-root .env via spring.config.import (OPENAI_API_KEY=...)
+  openai-api-key: ${OPENAI_API_KEY:}
+  default-model: gpt-4o-mini
+  max-tool-rounds: 20
+  trace-dir: logs/traces
+  trace-enabled: true
+
+syncfusion:
+  license-key: ${SYNCFUSION_LICENSE_KEY:}
+
+logging:
+  level:
+    com.docgen: INFO
+    com.docgen.trace.OPERATION: INFO
+  file:
+    name: logs/app.log

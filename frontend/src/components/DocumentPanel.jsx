@@ -1,119 +1,100 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { registerLicense } from '@syncfusion/ej2-base';
-import {
-  DocumentEditorContainerComponent,
-  Toolbar,
-} from '@syncfusion/ej2-react-documenteditor';
+import { apiFetch, apiGetJson, apiPostJson } from '../utils/apiClient';
 
-registerLicense(import.meta.env.VITE_SYNCFUSION_LICENSE || '');
-DocumentEditorContainerComponent.Inject(Toolbar);
+function docName(entry) {
+  return typeof entry === 'string' ? entry : entry?.name;
+}
 
-// Syncfusion demo service (v31+ URL).
-// All Syncfusion conversion calls (import, clipboard, spell-check) stay in
-// the frontend — the Python backend is only used for document storage and AI.
-const SYNCFUSION_SERVICE = 'https://document.syncfusion.com/web-services/docx-editor/api/documenteditor/';
-
-const TAB = { PREVIEW: 'preview', EDITOR: 'editor' };
-
-export default function DocumentPanel({ apiBase, editorRef, selectedDoc, onDocSelect, previewVersion, onSelectionChange }) {
-  const [documents, setDocuments]   = useState([]);
-  const [activeTab, setActiveTab]   = useState(TAB.PREVIEW);
+export default function DocumentPanel({
+  apiBase,
+  selectedDoc,
+  onDocSelect,
+  previewVersion,
+  onPreviewRefresh,
+  onSelectionChange,
+}) {
+  const [documents, setDocuments] = useState([]);
   const [newDocName, setNewDocName] = useState('');
   const [showNewInput, setShowNewInput] = useState(false);
-  const [uploading, setUploading]   = useState(false);
-  const [editorLoading, setEditorLoading] = useState(false);
-  const [editorError, setEditorError]   = useState(null);
-  const [saving, setSaving]             = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [uploadNote, setUploadNote] = useState('');
   const fileInputRef = useRef(null);
 
-  // ── Fetch document list ───────────────────────────────────────────────────
-  const refreshDocs = () => {
-    fetch(`${apiBase}/api/documents`)
-      .then((r) => r.json())
-      .then((d) => setDocuments(d.documents || []))
+  const refreshDocs = useCallback(() => {
+    apiGetJson(apiBase, '/api/documents')
+      .then((d) => setDocuments(d?.documents || []))
       .catch(() => {});
-  };
+  }, [apiBase]);
 
-  useEffect(() => { refreshDocs(); }, []);
+  useEffect(() => { refreshDocs(); }, [refreshDocs]);
 
-  // ── Load the selected document into the Syncfusion Rich Editor ───────────
-  // Flow: fetch .docx from Python → POST to Syncfusion import service → open SFDT
-  const loadDocumentInEditor = useCallback(async (docName) => {
-    if (!docName || !editorRef.current) return;
-    setEditorLoading(true);
-    setEditorError(null);
-    try {
-      // 1. Fetch the .docx file from our Python backend.
-      const docRes = await fetch(
-        `${apiBase}/api/documents/${encodeURIComponent(docName)}/download`
-      );
-      if (!docRes.ok) throw new Error(`Could not fetch document (${docRes.status})`);
-      const blob = await docRes.blob();
-
-      // 2. Send the .docx to Syncfusion's service to convert to SFDT JSON.
-      //    This is a purely frontend-to-Syncfusion call; the Python backend is
-      //    not involved.
-      const formData = new FormData();
-      formData.append('files', blob, docName);
-      const importRes = await fetch(`${SYNCFUSION_SERVICE}Import`, {
-        method: 'POST',
-        body: formData,
-      });
-      if (!importRes.ok) throw new Error(`Syncfusion import failed (${importRes.status})`);
-      const sfdt = await importRes.json();
-
-      // 3. Open the SFDT in the Syncfusion editor.
-      editorRef.current.documentEditor.open(JSON.stringify(sfdt));
-    } catch (err) {
-      setEditorError(err.message);
-    } finally {
-      setEditorLoading(false);
-    }
-  }, [apiBase, editorRef]);
-
-  // Auto-load when switching to the Rich Editor tab or when the doc/previewVersion changes.
   useEffect(() => {
-    if (activeTab === TAB.EDITOR && selectedDoc) {
-      loadDocumentInEditor(selectedDoc);
-    }
-  }, [activeTab, selectedDoc, previewVersion]);
+    const onMessage = (event) => {
+      if (event.data?.type !== 'docgen-selection') return;
+      const text = (event.data.text || '').trim();
+      if (text) onSelectionChange?.(text);
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [onSelectionChange]);
 
-  // ── Upload .docx ──────────────────────────────────────────────────────────
-  const handleUpload = async (e) => {
-    const file = e.target.files?.[0];
+  const uploadFile = async (file) => {
     if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.docx')) {
+      alert('Please upload a .docx Word document.');
+      return;
+    }
+
     setUploading(true);
+    setUploadNote('');
     try {
       const fd = new FormData();
       fd.append('file', file);
-      const res = await fetch(`${apiBase}/api/documents/upload`, { method: 'POST', body: fd });
-      if (!res.ok) throw new Error((await res.json()).detail || 'Upload failed');
-      const { saved_as } = await res.json();
+      const { res, data } = await apiFetch(`${apiBase}/api/documents/upload`, {
+        method: 'POST',
+        body: fd,
+      });
+      if (!res.ok) throw new Error(data?.detail || 'Upload failed');
+
+      const savedAs = data.saved_as;
       refreshDocs();
-      onDocSelect(saved_as);
-      setActiveTab(TAB.PREVIEW);
+      onDocSelect(savedAs);
+      onPreviewRefresh?.();
+
+      if (data.renamed) {
+        setUploadNote(`Saved as "${savedAs}" (original name was already in use).`);
+      } else {
+        setUploadNote(`Uploaded "${savedAs}".`);
+      }
     } catch (err) {
       alert(`Upload failed: ${err.message}`);
     } finally {
       setUploading(false);
-      e.target.value = '';
     }
   };
 
-  // ── Create empty doc ──────────────────────────────────────────────────────
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0];
+    await uploadFile(file);
+    e.target.value = '';
+  };
+
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    await uploadFile(file);
+  };
+
   const handleCreate = async () => {
     const name = newDocName.trim() || 'new-document';
     try {
-      const res = await fetch(`${apiBase}/api/documents`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
-      });
-      if (!res.ok) throw new Error((await res.json()).detail || 'Create failed');
-      const { name: saved } = await res.json();
+      const { data } = await apiPostJson(apiBase, '/api/documents', { name });
       refreshDocs();
-      onDocSelect(saved);
-      setActiveTab(TAB.PREVIEW);
+      onDocSelect(data.name);
+      onPreviewRefresh?.();
+      setUploadNote(`Created "${data.name}".`);
     } catch (err) {
       alert(`Create failed: ${err.message}`);
     } finally {
@@ -132,182 +113,102 @@ export default function DocumentPanel({ apiBase, editorRef, selectedDoc, onDocSe
 
   return (
     <div style={s.pane}>
-      {/* ── Top toolbar ── */}
       <div style={s.toolbar}>
-        {/* Document selector */}
-        <select
-          value={selectedDoc || ''}
-          onChange={(e) => { onDocSelect(e.target.value || null); setActiveTab(TAB.PREVIEW); }}
-          style={s.select}
-        >
-          <option value="">— select a document —</option>
-          {documents.map((d) => (
-            <option key={d} value={d}>{d}</option>
-          ))}
-        </select>
-
-        {/* Upload */}
-        <button
-          style={s.btn('#2b579a')}
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploading}
-          title="Upload a .docx file"
-        >
-          {uploading ? 'Uploading…' : '📂 Upload'}
-        </button>
-        <input
-          type="file"
-          accept=".docx"
-          ref={fileInputRef}
-          style={{ display: 'none' }}
-          onChange={handleUpload}
-        />
-
-        {/* New document */}
-        {showNewInput ? (
-          <span style={{ display: 'flex', gap: 4 }}>
-            <input
-              value={newDocName}
-              onChange={(e) => setNewDocName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-              placeholder="filename.docx"
-              style={s.newInput}
-              autoFocus
-            />
-            <button style={s.btn('#2e7d32')} onClick={handleCreate}>✓</button>
-            <button style={s.btn('#888')} onClick={() => setShowNewInput(false)}>✕</button>
-          </span>
-        ) : (
-          <button style={s.btn('#555')} onClick={() => setShowNewInput(true)} title="Create empty document">
-            ＋ New
-          </button>
-        )}
-
-        {/* Download */}
-        {downloadUrl && (
-          <a href={downloadUrl} download={selectedDoc} style={s.btn('#1565c0', true)}>
-            ⬇ Download
-          </a>
-        )}
-
-        {/* Save Rich Editor → Python server */}
-        {selectedDoc && activeTab === TAB.EDITOR && (
-          <button
-            style={s.btn(saving ? '#888' : '#2e7d32')}
-            disabled={saving}
-            title="Export SFDT from Syncfusion and save as .docx on the server"
-            onClick={async () => {
-              if (!editorRef.current) return;
-              setSaving(true);
-              try {
-                const sfdt = editorRef.current.documentEditor.serialize();
-                const res = await fetch(`${apiBase}/api/documents/save-sfdt`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ name: selectedDoc, sfdt }),
-                });
-                if (!res.ok) throw new Error((await res.json()).detail || 'Save failed');
-                alert(`✅ Saved "${selectedDoc}" to server.`);
-              } catch (err) {
-                alert(`Save failed: ${err.message}`);
-              } finally {
-                setSaving(false);
-              }
+        <div style={s.toolbarLeft}>
+          <span style={s.sectionLabel}>Document</span>
+          <select
+            value={selectedDoc || ''}
+            onChange={(e) => {
+              onDocSelect(e.target.value || null);
+              onPreviewRefresh?.();
             }}
+            style={s.select}
           >
-            {saving ? 'Saving…' : '💾 Save to Server'}
-          </button>
-        )}
-      </div>
-
-      {/* ── Tab bar ── */}
-      <div style={s.tabBar}>
-        {[
-          { key: TAB.PREVIEW, label: '🔍 Live Preview' },
-          { key: TAB.EDITOR,  label: '✏️ Rich Editor'  },
-        ].map(({ key, label }) => (
-          <button
-            key={key}
-            onClick={() => setActiveTab(key)}
-            style={s.tab(activeTab === key)}
-          >
-            {label}
-          </button>
-        ))}
-        {selectedDoc && (
-          <span style={s.docName}>{selectedDoc}</span>
-        )}
-      </div>
-
-      {/* ── Content ── */}
-      <div style={s.content}>
-        {/* Live Preview — iframe pointing at Python-rendered mammoth HTML */}
-        <div style={{ ...s.fill, display: activeTab === TAB.PREVIEW ? 'flex' : 'none', flexDirection: 'column' }}>
-          {previewUrl ? (
-            <iframe
-              key={previewVersion}         // forces a reload when the doc changes
-              src={previewUrl}
-              style={s.iframe}
-              title="Document preview"
-            />
-          ) : (
-            <div style={s.empty}>
-              Select or upload a document to see a live preview here.<br />
-              <span style={{ fontSize: 13, color: '#aaa' }}>
-                The preview refreshes automatically after every AI edit.
-              </span>
-            </div>
-          )}
+            <option value="">Select a document…</option>
+            {documents.map((d) => {
+              const name = docName(d);
+              return (
+                <option key={name} value={name}>{name}</option>
+              );
+            })}
+          </select>
         </div>
 
-        {/* Rich Editor — Syncfusion (only mounted when tab is active to prevent
-            toolbar dropdowns from rendering into <body> and breaking the layout) */}
-        {activeTab === TAB.EDITOR && (
-          <div style={{ ...s.fill, display: 'flex', flexDirection: 'column' }}>
-            {/* Status bar */}
-            {editorLoading && (
-              <div style={s.editorStatus('info')}>
-                ⏳ Loading document into editor…
-              </div>
-            )}
-            {editorError && (
-              <div style={s.editorStatus('error')}>
-                ⚠️ {editorError} —{' '}
-                <button onClick={() => loadDocumentInEditor(selectedDoc)} style={s.retryBtn}>
-                  Retry
-                </button>
-                {' '}or use the toolbar <strong>Open</strong> button.
-              </div>
-            )}
-            {!editorLoading && !editorError && selectedDoc && (
-              <div style={s.editorStatus('ok')}>
-                ✅ Showing <strong>{selectedDoc}</strong> — refreshes automatically after AI edits.
-              </div>
-            )}
-            {!selectedDoc && (
-              <div style={s.editorStatus('info')}>
-                Select a document from the dropdown to load it here.
-              </div>
-            )}
-            <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
-              <DocumentEditorContainerComponent
-                ref={editorRef}
-                serviceUrl={SYNCFUSION_SERVICE}
-                height="100%"
-                enableToolbar={true}
-                showPropertiesPane={false}
-                selectionChange={() => {
-                  if (!onSelectionChange || !editorRef.current) return;
-                  try {
-                    const raw = editorRef.current.documentEditor.selection.text || '';
-                    // Syncfusion uses \r as paragraph separator — normalise to \n
-                    // so the AI receives clean line breaks and context search works.
-                    const text = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-                    onSelectionChange(text);
-                  } catch (_) {}
-                }}
+        <div style={s.toolbarActions}>
+          <button
+            type="button"
+            style={s.btn}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+          >
+            {uploading ? 'Uploading…' : 'Upload .docx'}
+          </button>
+          <input
+            type="file"
+            accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ref={fileInputRef}
+            style={{ display: 'none' }}
+            onChange={handleUpload}
+          />
+
+          {showNewInput ? (
+            <span style={s.newRow}>
+              <input
+                value={newDocName}
+                onChange={(e) => setNewDocName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+                placeholder="filename.docx"
+                style={s.newInput}
+                autoFocus
               />
-            </div>
+              <button type="button" style={s.btnPrimary} onClick={handleCreate}>Create</button>
+              <button type="button" style={s.btnGhost} onClick={() => setShowNewInput(false)}>Cancel</button>
+            </span>
+          ) : (
+            <button type="button" style={s.btn} onClick={() => setShowNewInput(true)}>
+              New
+            </button>
+          )}
+
+          {downloadUrl && (
+            <a href={downloadUrl} download={selectedDoc} style={s.btnLink}>
+              Download
+            </a>
+          )}
+        </div>
+      </div>
+
+      {uploadNote && (
+        <div style={s.uploadNote}>{uploadNote}</div>
+      )}
+
+      <div
+        style={s.previewArea(dragOver)}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={handleDrop}
+      >
+        {previewUrl ? (
+          <iframe
+            key={`${selectedDoc}-${previewVersion}`}
+            src={previewUrl}
+            style={s.iframe}
+            title="Document preview"
+          />
+        ) : (
+          <div style={s.empty}>
+            <p style={s.emptyTitle}>Upload a Word document</p>
+            <p style={s.emptyHint}>
+              Drop a .docx file here or use Upload. Files are stored on the server in the document folder.
+            </p>
+            <button
+              type="button"
+              style={s.btnPrimaryLarge}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+            >
+              {uploading ? 'Uploading…' : 'Choose .docx file'}
+            </button>
           </div>
         )}
       </div>
@@ -315,113 +216,149 @@ export default function DocumentPanel({ apiBase, editorRef, selectedDoc, onDocSe
   );
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────────
 const s = {
   pane: {
     flex: 1,
     display: 'flex',
     flexDirection: 'column',
-    overflow: 'hidden',
-    background: '#f3f3f3',
     minWidth: 0,
+    minHeight: 0,
+    background: '#e8eaed',
   },
   toolbar: {
     display: 'flex',
     alignItems: 'center',
-    gap: 8,
-    padding: '8px 12px',
+    justifyContent: 'space-between',
+    gap: 12,
+    padding: '10px 16px',
     background: '#fff',
-    borderBottom: '1px solid #ddd',
+    borderBottom: '1px solid #dadce0',
     flexShrink: 0,
     flexWrap: 'wrap',
   },
-  select: {
-    padding: '5px 8px',
-    borderRadius: 6,
-    border: '1px solid #ccc',
-    fontSize: 13,
-    minWidth: 180,
-  },
-  btn: (bg, isAnchor = false) => ({
-    display: 'inline-flex',
+  toolbarLeft: {
+    display: 'flex',
     alignItems: 'center',
-    padding: '5px 11px',
-    background: bg,
+    gap: 10,
+    minWidth: 0,
+    flex: '1 1 240px',
+  },
+  toolbarActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  uploadNote: {
+    padding: '8px 16px',
+    fontSize: 12,
+    color: '#1a73e8',
+    background: '#e8f0fe',
+    borderBottom: '1px solid #d2e3fc',
+    flexShrink: 0,
+  },
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: 600,
+    color: '#5f6368',
+    whiteSpace: 'nowrap',
+  },
+  select: {
+    flex: 1,
+    minWidth: 160,
+    maxWidth: 420,
+    padding: '7px 10px',
+    borderRadius: 6,
+    border: '1px solid #dadce0',
+    fontSize: 13,
+    background: '#fff',
+    color: '#202124',
+  },
+  btn: {
+    padding: '7px 14px',
+    background: '#fff',
+    color: '#1a73e8',
+    border: '1px solid #dadce0',
+    borderRadius: 6,
+    fontSize: 13,
+    fontWeight: 500,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  },
+  btnPrimary: {
+    padding: '7px 14px',
+    background: '#1a73e8',
     color: '#fff',
     border: 'none',
     borderRadius: 6,
     fontSize: 13,
+    fontWeight: 500,
+    cursor: 'pointer',
+  },
+  btnPrimaryLarge: {
+    marginTop: 16,
+    padding: '10px 20px',
+    background: '#1a73e8',
+    color: '#fff',
+    border: 'none',
+    borderRadius: 8,
+    fontSize: 14,
     fontWeight: 600,
     cursor: 'pointer',
+  },
+  btnGhost: {
+    padding: '7px 10px',
+    background: 'transparent',
+    color: '#5f6368',
+    border: 'none',
+    borderRadius: 6,
+    fontSize: 13,
+    cursor: 'pointer',
+  },
+  btnLink: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '7px 14px',
+    background: '#fff',
+    color: '#1a73e8',
+    border: '1px solid #dadce0',
+    borderRadius: 6,
+    fontSize: 13,
+    fontWeight: 500,
     textDecoration: 'none',
     whiteSpace: 'nowrap',
-  }),
-  newInput: {
-    padding: '4px 8px',
-    borderRadius: 6,
-    border: '1px solid #ccc',
-    fontSize: 13,
-    width: 140,
   },
-  tabBar: {
+  newRow: {
     display: 'flex',
     alignItems: 'center',
-    gap: 0,
-    background: '#fff',
-    borderBottom: '2px solid #e0e0e0',
-    flexShrink: 0,
-    padding: '0 12px',
+    gap: 6,
   },
-  tab: (active) => ({
-    padding: '9px 18px',
-    border: 'none',
-    borderBottom: active ? '2px solid #2b579a' : '2px solid transparent',
-    background: 'none',
-    color: active ? '#2b579a' : '#666',
-    fontWeight: active ? 700 : 400,
+  newInput: {
+    padding: '6px 10px',
+    borderRadius: 6,
+    border: '1px solid #dadce0',
     fontSize: 13,
-    cursor: 'pointer',
-    marginBottom: -2,
-  }),
-  docName: {
-    marginLeft: 'auto',
-    fontSize: 12,
-    color: '#999',
-    fontStyle: 'italic',
-    paddingRight: 4,
+    width: 150,
   },
-  content: {
+  previewArea: (dragOver) => ({
     flex: 1,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  fill: {
-    position: 'absolute',
-    inset: 0,
-    overflow: 'hidden',
-  },
-  iframe: {
-    width: '100%',
-    height: '100%',
-    border: 'none',
-    background: '#f3f3f3',
-  },
-  editorStatus: (type) => ({
-    padding: '6px 14px',
-    background: type === 'error' ? '#fff3f3' : type === 'ok' ? '#f0fff4' : '#fff8e1',
-    fontSize: 12,
-    color: type === 'error' ? '#c62828' : type === 'ok' ? '#2e7d32' : '#666',
-    borderBottom: `1px solid ${type === 'error' ? '#ffcdd2' : type === 'ok' ? '#c8e6c9' : '#ffe082'}`,
-    flexShrink: 0,
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    padding: 12,
+    outline: dragOver ? '2px dashed #1a73e8' : 'none',
+    outlineOffset: -8,
+    background: dragOver ? '#e8f0fe' : 'transparent',
+    transition: 'background 0.15s',
   }),
-  retryBtn: {
-    background: 'none',
+  iframe: {
+    flex: 1,
+    width: '100%',
+    minHeight: 0,
     border: 'none',
-    color: '#1565c0',
-    cursor: 'pointer',
-    textDecoration: 'underline',
-    fontSize: 12,
-    padding: 0,
+    borderRadius: 8,
+    background: '#fff',
+    boxShadow: '0 1px 3px rgba(60,64,67,0.15)',
   },
   empty: {
     flex: 1,
@@ -429,10 +366,22 @@ const s = {
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    color: '#aaa',
-    fontSize: 15,
     textAlign: 'center',
-    gap: 10,
     padding: 40,
+    background: '#fff',
+    borderRadius: 8,
+    boxShadow: '0 1px 3px rgba(60,64,67,0.15)',
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: 600,
+    color: '#3c4043',
+    marginBottom: 8,
+  },
+  emptyHint: {
+    fontSize: 14,
+    color: '#80868b',
+    lineHeight: 1.5,
+    maxWidth: 400,
   },
 };

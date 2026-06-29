@@ -1,52 +1,89 @@
 import { useState, useRef, useEffect } from 'react';
+import { apiGetJson } from '../utils/apiClient';
 
 export default function ChatBot({
-  messages, isLoading,
-  models, selectedModel, onModelChange,
-  onSend, onSelectionEdit,
+  messages,
+  isLoading,
+  models,
+  selectedModel,
+  onModelChange,
+  onSend,
   onClearHistory,
+  onClearSelection,
   selectedDoc,
-  editMode, onEditModeChange,
   selectionText,
+  apiBase,
 }) {
   const [input, setInput] = useState('');
   const [expandedTools, setExpandedTools] = useState({});
+  const [expandedTraces, setExpandedTraces] = useState({});
+  const [showActivity, setShowActivity] = useState(false);
+  const [recentTraces, setRecentTraces] = useState([]);
   const bottomRef = useRef(null);
-
-  const isSelectionMode = editMode === 'selection';
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
 
+  const loadRecentTraces = () => {
+    if (!apiBase) return;
+    apiGetJson(apiBase, '/api/traces').then((d) => {
+      if (d?.traces) setRecentTraces(d.traces);
+    });
+  };
+
+  useEffect(() => {
+    if (showActivity) loadRecentTraces();
+  }, [showActivity, apiBase, messages]);
+
   const handleSend = () => {
     const trimmed = input.trim();
     if (!trimmed || isLoading) return;
-    if (isSelectionMode) {
-      onSelectionEdit(trimmed);
-    } else {
-      onSend(trimmed);
-    }
+    onSend(trimmed);
     setInput('');
   };
 
   const toggleTools = (i) =>
     setExpandedTools((prev) => ({ ...prev, [i]: !prev[i] }));
 
+  const toggleTrace = (i) =>
+    setExpandedTraces((prev) => ({ ...prev, [i]: !prev[i] }));
+
+  let backendLabel = '';
+  try {
+    backendLabel = apiBase ? new URL(apiBase).host : '';
+  } catch {
+    backendLabel = apiBase || '';
+  }
+
   return (
     <div style={s.pane}>
-      {/* Header */}
       <div style={s.header}>
-        <span>📝 Document AI Agent</span>
-        <button onClick={onClearHistory} style={s.clearBtn} title="Clear conversation history">
-          🗑 Clear
-        </button>
+        <div>
+          <div style={s.title}>Document Assistant</div>
+          <div style={s.subtitle}>
+            Java backend · {backendLabel || 'not connected'}
+          </div>
+        </div>
+        <div style={s.headerActions}>
+          <button
+            type="button"
+            onClick={() => setShowActivity((v) => !v)}
+            style={s.clearBtn}
+            title="Recent operation traces"
+          >
+            Activity
+          </button>
+          <button type="button" onClick={onClearHistory} style={s.clearBtn}>
+            Clear
+          </button>
+        </div>
       </div>
 
-      {/* Model selector */}
       <div style={s.modelRow}>
-        <label style={s.modelLabel}>Model</label>
+        <label style={s.modelLabel} htmlFor="model-select">Model</label>
         <select
+          id="model-select"
           value={selectedModel}
           onChange={(e) => onModelChange(e.target.value)}
           style={s.modelSelect}
@@ -57,76 +94,104 @@ export default function ChatBot({
         </select>
       </div>
 
-      {/* Mode toggle */}
-      <div style={s.modeBar}>
-        <button
-          onClick={() => onEditModeChange('agent')}
-          style={s.modeBtn(!isSelectionMode)}
-          title="Agent Mode: the AI edits the whole document using python-docx tools"
-        >
-          Agent Mode
-        </button>
-        <button
-          onClick={() => onEditModeChange('selection')}
-          style={s.modeBtn(isSelectionMode)}
-          title="Rewrite Mode: highlight text in the Rich Editor, then send a rewrite instruction"
-        >
-          Highlight & Rewrite
-        </button>
+      {selectedDoc && (
+        <div style={s.docBadge}>
+          <span style={s.docBadgeLabel}>Active</span>
+          <span style={s.docBadgeName}>{selectedDoc}</span>
+        </div>
+      )}
+
+      <div style={s.selectionBox(!!selectionText)}>
+        <div style={s.selectionHeader}>
+          <span style={s.selectionLabel}>Selected from preview</span>
+          {selectionText && (
+            <button type="button" onClick={onClearSelection} style={s.clearSelectionBtn}>
+              Clear
+            </button>
+          )}
+        </div>
+        {selectionText ? (
+          <div style={s.selectionPreview}>&ldquo;{selectionText}&rdquo;</div>
+        ) : (
+          <div style={s.selectionHint}>
+            Highlight text in the preview on the right — it will appear here as context for your next message.
+          </div>
+        )}
       </div>
 
-      {/* Selection preview (shown in Rewrite mode) */}
-      {isSelectionMode && (
-        <div style={s.selectionBox(!!selectionText)}>
-          {selectionText ? (
-            <>
-              <div style={s.selectionLabel}>Selected text:</div>
-              <div style={s.selectionPreview}>&ldquo;{selectionText}&rdquo;</div>
-            </>
+      {showActivity && (
+        <div style={s.activityPanel}>
+          <div style={s.activityTitle}>Recent traces (logs/traces/)</div>
+          {recentTraces.length === 0 ? (
+            <div style={s.activityEmpty}>No traces yet.</div>
           ) : (
-            <div style={s.selectionHint}>
-              Switch to the <strong>Rich Editor</strong> tab and highlight text to rewrite it.
-            </div>
+            recentTraces.slice(0, 8).map((t) => (
+              <div key={t.trace_id || t.folder} style={s.activityRow}>
+                <span style={s.activityId}>{t.trace_id || '—'}</span>
+                <span style={s.activityMeta}>
+                  {t.kind || t.path || ''} · {t.status || '—'}
+                  {t.operation_count != null ? ` · ${t.operation_count} ops` : ''}
+                </span>
+              </div>
+            ))
           )}
         </div>
       )}
 
-      {selectedDoc && (
-        <div style={s.docBadge}>Editing: <strong>{selectedDoc}</strong></div>
-      )}
-
-      {/* Message list */}
       <div style={s.messageList}>
         {messages.length === 0 && (
           <p style={s.emptyHint}>
-            {isSelectionMode
-              ? 'Highlight text in the Rich Editor, then type a rewrite instruction here.'
-              : 'Select a document on the right, then tell the agent what to edit.'}
+            Upload or select a document, highlight any passage in the preview, then describe what to change.
           </p>
         )}
 
         {messages.map((msg, i) => (
-          <div key={i} style={{ marginBottom: 14 }}>
+          <div key={i} style={s.msgBlock}>
             <div style={s.label(msg.role)}>
-              {msg.role === 'user' ? 'You' : 'AI Agent'}
+              {msg.role === 'user' ? 'You' : 'Assistant'}
             </div>
             {msg.selectionPreview && (
               <div style={s.msgSelectionTag}>
-                Rewriting: &ldquo;{msg.selectionPreview}&rdquo;
+                Referencing: &ldquo;{msg.selectionPreview}&rdquo;
               </div>
             )}
             <div style={s.row(msg.role)}>
               <span style={s.bubble(msg.role)}>{msg.text}</span>
             </div>
 
-            {/* Tool calls — collapsible */}
+            {msg.roundSummary && (
+              <div style={s.roundBox}>
+                <button type="button" onClick={() => toggleTrace(i)} style={s.roundToggle}>
+                  This round — {msg.roundSummary.change_count ?? 0} change
+                  {(msg.roundSummary.change_count ?? 0) !== 1 ? 's' : ''}
+                  {msg.traceId ? ` · trace ${msg.traceId}` : ''}
+                  {expandedTraces[i] ? ' ▲' : ' ▼'}
+                </button>
+                {expandedTraces[i] ? (
+                  <div style={s.roundBody}>
+                    <pre style={s.roundPre}>{msg.roundSummary.summary_text}</pre>
+                    {(msg.roundSummary.changes || []).map((c, j) => (
+                      <div key={j} style={s.roundChange}>
+                        <strong>{c.tool}</strong>: {c.description}
+                        <div style={s.roundResult}>{c.result}</div>
+                      </div>
+                    ))}
+                    {msg.roundSummary.has_snapshots && (
+                      <div style={s.roundNote}>
+                        Before/after snapshots saved in trace folder.
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={s.roundCollapsed}>{msg.roundSummary.summary_text}</div>
+                )}
+              </div>
+            )}
+
             {msg.toolCalls?.length > 0 && (
-              <div style={{ marginTop: 4, paddingLeft: msg.role === 'ai' ? 0 : undefined }}>
-                <button
-                  onClick={() => toggleTools(i)}
-                  style={s.toolToggle}
-                >
-                  🔧 {msg.toolCalls.length} tool call{msg.toolCalls.length > 1 ? 's' : ''}
+              <div style={s.toolSection}>
+                <button type="button" onClick={() => toggleTools(i)} style={s.toolToggle}>
+                  {msg.toolCalls.length} tool call{msg.toolCalls.length > 1 ? 's' : ''}
                   {expandedTools[i] ? ' ▲' : ' ▼'}
                 </button>
                 {expandedTools[i] && (
@@ -149,7 +214,7 @@ export default function ChatBot({
 
         {isLoading && (
           <div>
-            <div style={s.label('ai')}>AI Agent</div>
+            <div style={s.label('ai')}>Assistant</div>
             <span style={s.typing}>Thinking…</span>
           </div>
         )}
@@ -157,27 +222,28 @@ export default function ChatBot({
         <div ref={bottomRef} />
       </div>
 
-      {/* Input area */}
       <div style={s.inputArea}>
         <textarea
           rows={2}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-          placeholder={
-            isSelectionMode
-              ? 'Describe how to rewrite the selection… (Enter to send)'
-              : 'Tell the agent what to edit… (Enter to send)'
-          }
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              handleSend();
+            }
+          }}
+          placeholder="Describe what to change… (Enter to send)"
           style={s.textarea}
           disabled={isLoading}
         />
         <button
+          type="button"
           onClick={handleSend}
           disabled={isLoading || !input.trim()}
           style={s.sendBtn(isLoading || !input.trim())}
         >
-          {isLoading ? '…' : isSelectionMode ? 'Rewrite' : 'Send'}
+          {isLoading ? '…' : 'Send'}
         </button>
       </div>
     </div>
@@ -186,136 +252,175 @@ export default function ChatBot({
 
 const s = {
   pane: {
-    width: '30%',
-    minWidth: 260,
-    maxWidth: 420,
+    width: 380,
+    flexShrink: 0,
     display: 'flex',
     flexDirection: 'column',
-    borderRight: '1px solid #ddd',
+    minHeight: 0,
+    borderRight: '1px solid #dadce0',
     background: '#fff',
   },
   header: {
     display: 'flex',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
-    padding: '12px 14px',
-    background: '#2b579a',
+    gap: 8,
+    padding: '14px 16px',
+    background: '#1a73e8',
     color: '#fff',
-    fontWeight: 700,
-    fontSize: 14,
     flexShrink: 0,
+    flexWrap: 'wrap',
+  },
+  title: {
+    fontWeight: 600,
+    fontSize: 15,
+    lineHeight: 1.3,
+  },
+  subtitle: {
+    fontSize: 11,
+    opacity: 0.85,
+    marginTop: 2,
   },
   clearBtn: {
-    background: 'rgba(255,255,255,0.18)',
+    background: 'rgba(255,255,255,0.15)',
     border: 'none',
     color: '#fff',
-    padding: '3px 9px',
-    borderRadius: 5,
+    padding: '5px 10px',
+    borderRadius: 6,
     cursor: 'pointer',
     fontSize: 12,
+    flexShrink: 0,
+  },
+  headerActions: {
+    display: 'flex',
+    gap: 6,
+    flexShrink: 0,
   },
   modelRow: {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
-    padding: '7px 12px',
-    borderBottom: '1px solid #eee',
+    padding: '8px 16px',
+    borderBottom: '1px solid #e8eaed',
     flexShrink: 0,
-    background: '#fafafa',
+    background: '#f8f9fa',
   },
-  modelLabel: { fontSize: 12, color: '#555', whiteSpace: 'nowrap' },
+  modelLabel: {
+    fontSize: 12,
+    color: '#5f6368',
+    whiteSpace: 'nowrap',
+  },
   modelSelect: {
     flex: 1,
     fontSize: 12,
-    padding: '3px 6px',
-    borderRadius: 5,
-    border: '1px solid #ccc',
+    padding: '5px 8px',
+    borderRadius: 6,
+    border: '1px solid #dadce0',
+    background: '#fff',
   },
   docBadge: {
-    fontSize: 11,
-    color: '#555',
-    padding: '4px 12px',
-    background: '#f0f4ff',
-    borderBottom: '1px solid #dce6ff',
-    flexShrink: 0,
-  },
-  modeBar: {
     display: 'flex',
-    flexShrink: 0,
-    borderBottom: '1px solid #eee',
-  },
-  modeBtn: (active) => ({
-    flex: 1,
-    padding: '7px 4px',
-    border: 'none',
-    borderBottom: active ? '2px solid #2b579a' : '2px solid transparent',
-    background: active ? '#f0f4ff' : '#fafafa',
-    color: active ? '#2b579a' : '#666',
-    fontWeight: active ? 700 : 400,
+    alignItems: 'center',
+    gap: 8,
     fontSize: 12,
-    cursor: 'pointer',
-    transition: 'all 0.15s',
-  }),
-  selectionBox: (hasSelection) => ({
-    margin: '6px 10px',
-    padding: '6px 10px',
-    borderRadius: 6,
-    border: `1px solid ${hasSelection ? '#2b579a' : '#ddd'}`,
-    background: hasSelection ? '#f0f4ff' : '#fafafa',
+    padding: '6px 16px',
+    background: '#e8f0fe',
+    borderBottom: '1px solid #d2e3fc',
     flexShrink: 0,
-    fontSize: 11,
+    minWidth: 0,
+  },
+  docBadgeLabel: {
+    color: '#1a73e8',
+    fontWeight: 600,
+    flexShrink: 0,
+  },
+  docBadgeName: {
+    color: '#3c4043',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  selectionBox: (hasSelection) => ({
+    margin: '8px 12px',
+    padding: '8px 10px',
+    borderRadius: 8,
+    border: `1px solid ${hasSelection ? '#1a73e8' : '#dadce0'}`,
+    background: hasSelection ? '#e8f0fe' : '#f8f9fa',
+    flexShrink: 0,
+    fontSize: 12,
   }),
+  selectionHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 4,
+  },
   selectionLabel: {
-    color: '#2b579a',
-    fontWeight: 700,
-    marginBottom: 2,
+    color: '#1a73e8',
+    fontWeight: 600,
     fontSize: 10,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
+  },
+  clearSelectionBtn: {
+    border: 'none',
+    background: 'transparent',
+    color: '#5f6368',
+    fontSize: 11,
+    cursor: 'pointer',
+    padding: 0,
   },
   selectionPreview: {
-    color: '#333',
+    color: '#202124',
     fontStyle: 'italic',
     lineHeight: 1.4,
     wordBreak: 'break-word',
-    maxHeight: 60,
+    maxHeight: 72,
     overflowY: 'auto',
   },
   selectionHint: {
-    color: '#999',
+    color: '#80868b',
     lineHeight: 1.4,
+    fontSize: 11,
   },
   msgSelectionTag: {
     fontSize: 10,
-    color: '#2b579a',
+    color: '#1a73e8',
     background: '#eef2ff',
     borderRadius: 4,
-    padding: '2px 7px',
-    marginBottom: 3,
+    padding: '3px 8px',
+    marginBottom: 4,
     display: 'inline-block',
     fontStyle: 'italic',
-    maxWidth: '88%',
+    maxWidth: '92%',
     wordBreak: 'break-word',
   },
   messageList: {
     flex: 1,
+    minHeight: 0,
     overflowY: 'auto',
-    padding: '14px 12px',
+    padding: '14px 16px',
   },
   emptyHint: {
-    color: '#bbb',
+    color: '#9aa0a6',
     fontSize: 13,
     textAlign: 'center',
-    marginTop: 50,
+    marginTop: 48,
     lineHeight: 1.6,
+    padding: '0 8px',
+  },
+  msgBlock: {
+    marginBottom: 14,
   },
   label: (role) => ({
     fontSize: 10,
-    color: '#aaa',
-    marginBottom: 2,
+    color: '#9aa0a6',
+    marginBottom: 3,
     textAlign: role === 'user' ? 'right' : 'left',
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
+    fontWeight: 600,
   }),
   row: (role) => ({
     display: 'flex',
@@ -323,76 +428,168 @@ const s = {
   }),
   bubble: (role) => ({
     display: 'inline-block',
-    padding: '8px 12px',
-    borderRadius: role === 'user' ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
-    background: role === 'user' ? '#2b579a' : '#f0f2f5',
-    color: role === 'user' ? '#fff' : '#1a1a1a',
+    padding: '9px 12px',
+    borderRadius: role === 'user' ? '12px 12px 4px 12px' : '12px 12px 12px 4px',
+    background: role === 'user' ? '#1a73e8' : '#f1f3f4',
+    color: role === 'user' ? '#fff' : '#202124',
     fontSize: 13,
     lineHeight: 1.5,
-    maxWidth: '88%',
+    maxWidth: '92%',
     wordBreak: 'break-word',
     whiteSpace: 'pre-wrap',
   }),
   typing: {
     fontSize: 13,
-    color: '#aaa',
+    color: '#9aa0a6',
     fontStyle: 'italic',
+  },
+  toolSection: {
+    marginTop: 4,
   },
   toolToggle: {
     background: 'none',
-    border: '1px solid #ddd',
-    borderRadius: 5,
+    border: '1px solid #dadce0',
+    borderRadius: 6,
     fontSize: 11,
-    color: '#888',
+    color: '#5f6368',
     cursor: 'pointer',
-    padding: '2px 8px',
-    marginTop: 3,
+    padding: '3px 8px',
   },
   toolList: {
-    marginTop: 4,
-    background: '#f8f8f8',
+    marginTop: 6,
+    background: '#f8f9fa',
     borderRadius: 6,
-    border: '1px solid #eee',
-    padding: '6px 8px',
+    border: '1px solid #e8eaed',
+    padding: '8px 10px',
     fontSize: 11,
   },
-  toolItem: { marginBottom: 6 },
+  toolItem: {
+    marginBottom: 6,
+  },
   toolPre: {
-    margin: '2px 0 0',
-    fontFamily: 'monospace',
+    margin: '3px 0 0',
+    fontFamily: 'Consolas, monospace',
     fontSize: 10,
-    color: '#555',
+    color: '#5f6368',
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-all',
   },
-  inputArea: {
-    padding: '10px 10px',
-    borderTop: '1px solid #eee',
+  activityPanel: {
+    padding: '8px 12px',
+    background: '#f1f3f4',
+    borderBottom: '1px solid #e8eaed',
+    flexShrink: 0,
+    maxHeight: 140,
+    overflowY: 'auto',
+    fontSize: 11,
+  },
+  activityTitle: {
+    fontWeight: 600,
+    color: '#5f6368',
+    marginBottom: 6,
+    fontSize: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  activityEmpty: {
+    color: '#9aa0a6',
+  },
+  activityRow: {
     display: 'flex',
-    gap: 7,
+    flexDirection: 'column',
+    gap: 2,
+    padding: '4px 0',
+    borderBottom: '1px solid #e8eaed',
+  },
+  activityId: {
+    fontFamily: 'Consolas, monospace',
+    color: '#1a73e8',
+    fontWeight: 600,
+  },
+  activityMeta: {
+    color: '#5f6368',
+  },
+  roundBox: {
+    marginTop: 6,
+    border: '1px solid #c2d7f7',
+    borderRadius: 8,
+    background: '#f8fbff',
+    overflow: 'hidden',
+  },
+  roundToggle: {
+    width: '100%',
+    textAlign: 'left',
+    padding: '6px 10px',
+    border: 'none',
+    background: '#e8f0fe',
+    color: '#1a73e8',
+    fontSize: 11,
+    fontWeight: 600,
+    cursor: 'pointer',
+  },
+  roundCollapsed: {
+    padding: '6px 10px',
+    fontSize: 11,
+    color: '#3c4043',
+    whiteSpace: 'pre-wrap',
+    lineHeight: 1.4,
+  },
+  roundBody: {
+    padding: '8px 10px',
+    fontSize: 11,
+  },
+  roundPre: {
+    margin: '0 0 8px',
+    whiteSpace: 'pre-wrap',
+    fontFamily: 'inherit',
+    color: '#202124',
+    lineHeight: 1.45,
+  },
+  roundChange: {
+    marginBottom: 8,
+    paddingBottom: 6,
+    borderBottom: '1px solid #e8eaed',
+  },
+  roundResult: {
+    color: '#5f6368',
+    marginTop: 2,
+    fontSize: 10,
+  },
+  roundNote: {
+    marginTop: 6,
+    fontSize: 10,
+    color: '#80868b',
+    fontStyle: 'italic',
+  },
+  inputArea: {
+    padding: '12px 16px',
+    borderTop: '1px solid #e8eaed',
+    display: 'flex',
+    gap: 8,
     alignItems: 'flex-end',
-    background: '#fafafa',
+    background: '#f8f9fa',
     flexShrink: 0,
   },
   textarea: {
     flex: 1,
     resize: 'none',
-    padding: '8px 10px',
+    padding: '9px 11px',
     borderRadius: 8,
-    border: '1px solid #ccc',
+    border: '1px solid #dadce0',
     fontSize: 13,
     fontFamily: 'inherit',
     outline: 'none',
     lineHeight: 1.45,
+    background: '#fff',
   },
   sendBtn: (disabled) => ({
-    padding: '8px 14px',
-    background: disabled ? '#b0bec5' : '#2b579a',
-    color: '#fff',
+    padding: '9px 16px',
+    background: disabled ? '#dadce0' : '#1a73e8',
+    color: disabled ? '#80868b' : '#fff',
     border: 'none',
     borderRadius: 8,
     cursor: disabled ? 'not-allowed' : 'pointer',
-    fontWeight: 700,
+    fontWeight: 600,
     fontSize: 13,
     whiteSpace: 'nowrap',
   }),

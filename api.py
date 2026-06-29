@@ -17,24 +17,30 @@ GET  /api/documents/{name}/download    download the .docx
 GET  /api/documents/{name}/preview     HTML preview via mammoth
 POST /api/chat                         run one agent turn (python-docx Agent Mode)
 POST /api/edit-selection               rewrite highlighted text (Selection Mode)
+POST /api/trace/{trace_id}/append      append client-side trace data to a trace folder
 DELETE /api/sessions/{session_id}      clear conversation history
+
+JSON traces for every /api/* call are saved under logs/traces/ (disable with API_TRACE=0).
 """
 
 from __future__ import annotations
 
 import json
 import re
+import time
 import uuid
 from pathlib import Path
 from typing import Optional
 
 import mammoth
 from dotenv import load_dotenv
-from fastapi import Body, FastAPI, File, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel
+from starlette.requests import ClientDisconnect
 
+from api_trace import ApiTrace, append_extra, begin_trace, list_recent_traces, tracing_enabled
 from app_logger import get_logger, truncate
 from doc_editor import SYSTEM_PROMPT, TOOLS as DOC_TOOLS, DocEditor, dispatch
 from llm_provider import ALL_MODELS, get_provider
@@ -52,7 +58,77 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Trace-Id", "X-Trace-Dir"],
 )
+
+
+@app.middleware("http")
+async def trace_api_exchange(request: Request, call_next):
+    """Save exact request/response JSON for every /api/* call."""
+    path = request.url.path
+    if not path.startswith("/api/") or not tracing_enabled():
+        return await call_next(request)
+
+    trace: ApiTrace | None = begin_trace(
+        request.method,
+        path,
+        request.url.query,
+    )
+    started = time.perf_counter()
+
+    try:
+        body_bytes = await request.body()
+    except ClientDisconnect:
+        if trace:
+            trace.save_request(b"", request.headers.get("content-type"))
+            trace.save_response(499, b"", None, (time.perf_counter() - started) * 1000)
+        return Response(status_code=499)
+
+    if trace:
+        trace.save_request(body_bytes, request.headers.get("content-type"))
+
+    async def receive():
+        return {"type": "http.request", "body": body_bytes, "more_body": False}
+
+    request = Request(request.scope, receive)
+    if trace:
+        request.state.trace = trace
+    response = await call_next(request)
+
+    resp_body = b""
+    async for chunk in response.body_iterator:
+        resp_body += chunk
+
+    duration_ms = (time.perf_counter() - started) * 1000
+    if trace:
+        trace.save_response(
+            response.status_code,
+            resp_body,
+            response.headers.get("content-type"),
+            duration_ms,
+        )
+        log.info(
+            "API TRACE | id=%s | %s %s → %d (%.0f ms) | %s",
+            trace.trace_id,
+            request.method,
+            path,
+            response.status_code,
+            duration_ms,
+            trace.dir.name,
+        )
+
+    headers = dict(response.headers)
+    if trace:
+        headers["X-Trace-Id"] = trace.trace_id
+        headers["X-Trace-Dir"] = str(trace.dir.relative_to(Path(__file__).parent))
+
+    return Response(
+        content=resp_body,
+        status_code=response.status_code,
+        headers=headers,
+        media_type=response.media_type,
+    )
+
 
 DOC_DIR = Path(__file__).parent / "docs"
 DOC_DIR.mkdir(exist_ok=True)
@@ -211,7 +287,32 @@ PREVIEW_WRAPPER = """\
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "tracing": tracing_enabled()}
+
+
+class TraceAppendRequest(BaseModel):
+    name: str = "client"
+    data: dict | list | str | int | float | bool | None = None
+
+
+@app.post("/api/trace/{trace_id}/append")
+def trace_append(trace_id: str, req: TraceAppendRequest):
+    """Append frontend-only execution data to an existing trace folder."""
+    path = append_extra(trace_id, req.name, req.data)
+    if path is None:
+        raise HTTPException(404, f"Trace '{trace_id}' not found.")
+    log.info("API TRACE APPEND | id=%s | %s", trace_id, path.name)
+    return {"trace_id": trace_id, "saved_as": path.name}
+
+
+@app.get("/api/traces")
+def list_traces(limit: int = 30):
+    """List recent API trace folders (newest first)."""
+    return {
+        "tracing": tracing_enabled(),
+        "trace_root": str((Path(__file__).parent / "logs" / "traces").relative_to(Path(__file__).parent)),
+        "traces": list_recent_traces(limit),
+    }
 
 
 @app.get("/api/models")
@@ -413,7 +514,13 @@ ABSOLUTE RULES:
    NEVER use a single character, symbol, or string shorter than 3 words as "find".
 5. One edit per line — if N lines each need the same kind of change, produce exactly N separate edits, one per line. Do NOT share a single short "find" across multiple lines.
 6. NEVER output context_before or context_after content.
-7. NEVER add or remove bullet characters (•, -, *), numbering, or markdown — those are paragraph-style properties, not text content.\
+7. NEVER add or remove bullet characters (•, -, *), numbering, or markdown — those are paragraph-style properties, not text content.
+8. FORMATTING PRESERVATION — the editor keeps bold, italic, highlight colour, and list/table structure automatically ONLY when edits are surgical:
+   a. Lines that mix formatted and plain text (e.g. a bold "Day 1 —" prefix followed by regular body text): NEVER include the formatted prefix in "find". Target only the plain-text tail or the specific word being changed.
+   b. Headings / chapter titles that are entirely bold: change only the specific word(s) inside the title, with 2–3 neighbouring words for uniqueness — never the full heading.
+   c. Highlighted or coloured spans: "find" must sit entirely inside one continuous phrase; do not span from plain text into highlighted text or across highlight boundaries.
+   d. Lists: each list item is one line. Apply one edit per item. Never include list markers or numbering in "find"/"replace".
+   e. Tables: treat each cell's text like a mini-paragraph; scope "find" to the cell phrase being changed, not the whole row.\
 """
 
 
@@ -443,7 +550,7 @@ def _build_selection_prompt(req: AIEditRequest) -> str:
 
 
 @app.post("/api/edit-selection")
-def edit_selection(req: AIEditRequest):
+def edit_selection(req: AIEditRequest, request: Request):
     """Surgical batch-replace editing of a highlighted text range.
 
     The LLM analyses the selected text and returns a ``batch_replace`` JSON
@@ -479,6 +586,11 @@ def edit_selection(req: AIEditRequest):
     raw = raw.strip()
 
     log.info("EDIT-SELECTION RAW | %r", truncate(raw, 400))
+
+    trace = getattr(request.state, "trace", None)
+    if trace:
+        trace.save_extra("llm_prompt", {"system": _SELECTION_SYSTEM, "user": prompt})
+        trace.save_extra("llm_raw", {"raw": raw})
 
     try:
         result = json.loads(raw)
