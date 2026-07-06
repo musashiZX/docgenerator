@@ -1,0 +1,15 @@
+server:
+  port: ${SERVER_PORT:8081}
+
+spring:
+  config:
+    import: optional:file:../.env[.properties],optional:file:.env[.properties]
+
+app:
+  docs-dir: docs
+
+logging:
+  level:
+    com.docgen: INFO
+  file:
+    name: logs/app.log

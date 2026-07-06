@@ -9,4 +9,5 @@ logs/
 *.doc
 *.docx
 *.pdf
+!docx4j-agent-server/src/test/resources/**/*.docx
 
