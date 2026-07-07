@@ -8,7 +8,10 @@ import com.docgen.model.ApplyResult;
 import com.docgen.model.MutationBatch;
 import com.docgen.model.StructuralIndex;
 import com.docgen.mutation.MutationApplier;
+import jakarta.servlet.http.HttpServletRequest;
 import org.docx4j.openpackaging.packages.WordprocessingMLPackage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -29,6 +32,8 @@ import java.util.Map;
 @RequestMapping("/api/dev")
 public class DevApplyController {
 
+    private static final Logger log = LoggerFactory.getLogger(DevApplyController.class);
+
     private final DocumentLoader documentLoader;
     private final BookmarkIndexer bookmarkIndexer;
     private final StructuralIndexBuilder indexBuilder;
@@ -46,8 +51,15 @@ public class DevApplyController {
     }
 
     @PostMapping("/apply/{name}")
-    public Map<String, Object> apply(@PathVariable("name") String name, @RequestBody MutationBatch batch)
+    public Map<String, Object> apply(
+            @PathVariable("name") String name,
+            @RequestBody MutationBatch batch,
+            HttpServletRequest request)
             throws Exception {
+
+        String traceId = String.valueOf(request.getAttribute(TraceIdFilter.TRACE_ID_ATTR));
+        int mutationCount = batch.mutations() == null ? 0 : batch.mutations().size();
+        log.info("[trace:{}] DEV apply request doc={} mutations={}", traceId, name, mutationCount);
 
         Path path = documentLoader.resolveDoc(name);
         WordprocessingMLPackage document = documentLoader.load(path);
@@ -58,9 +70,13 @@ public class DevApplyController {
         ApplyResult result = mutationApplier.apply(session, batch, index);
 
         documentLoader.save(session.document(), path);
+        log.info("[trace:{}] DEV apply success doc={} changed_ids={}",
+                traceId, name, result.changedIds());
         return Map.of(
                 "status", "ok",
                 "applied_count", result.appliedCount(),
-                "changed_ids", result.changedIds());
+                "changed_ids", result.changedIds(),
+                "created_ids", result.createdIds(),
+                "trace_id", traceId);
     }
 }

@@ -40,6 +40,14 @@ public class FixtureGeneratorTest {
         FixtureFactory.writeTable3x3(input);
     }
 
+    @Test
+    void generateGoldenInsertDeleteInput() throws Exception {
+        Path moduleDir = moduleRoot();
+        Path input = moduleDir.resolve("src/test/resources/golden/insert-delete/input.docx");
+        Files.createDirectories(input.getParent());
+        FixtureFactory.writeParagraphs(input, "Alpha", "Bravo", "Charlie");
+    }
+
     public static Path moduleRoot() {
         Path cwd = Path.of("").toAbsolutePath().normalize();
         if (Files.exists(cwd.resolve("pom.xml"))) {

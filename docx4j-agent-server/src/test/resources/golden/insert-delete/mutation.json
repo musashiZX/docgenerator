@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "explanation": "Golden scenario: insert a note after the second paragraph and delete the third.",
+  "mutations": [
+    {
+      "op": "insert",
+      "anchor_id": "dg_p1",
+      "position": "after",
+      "node_type": "paragraph",
+      "text": "Inserted note"
+    },
+    {
+      "op": "delete",
+      "target_id": "dg_p2"
+    }
+  ]
+}

@@ -45,6 +45,27 @@ public class BookmarkIndexer {
         }
     }
 
+    /**
+     * Bookmarks a freshly inserted paragraph with the next free {@code dg_p{n}}
+     * name. Existing ids are never renumbered, so ids of surrounding blocks
+     * stay stable. Call after the paragraph is already in the body.
+     */
+    public String bookmarkNewParagraph(WordprocessingMLPackage document, P paragraph) {
+        int nextOrdinal = 0;
+        for (String name : collectBookmarkNames(document)) {
+            if (name.startsWith("dg_p")) {
+                try {
+                    nextOrdinal = Math.max(nextOrdinal, Integer.parseInt(name.substring(4)) + 1);
+                } catch (NumberFormatException ignored) {
+                    // non-numeric suffix (not one of ours) — skip
+                }
+            }
+        }
+        String name = "dg_p" + nextOrdinal;
+        addBookmark(paragraph, name, maxBookmarkNumericId(document) + 1);
+        return name;
+    }
+
     static void addBookmark(P paragraph, String name, long id) {
         if (hasBookmark(paragraph, name)) {
             return;

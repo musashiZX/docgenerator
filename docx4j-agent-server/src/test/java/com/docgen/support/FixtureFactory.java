@@ -43,6 +43,23 @@ public final class FixtureFactory {
         singleParagraph(text).save(path.toFile());
     }
 
+    /** One paragraph per given text, in order. */
+    public static WordprocessingMLPackage paragraphs(String... texts) throws Exception {
+        WordprocessingMLPackage pkg = WordprocessingMLPackage.createPackage();
+        MainDocumentPart main = pkg.getMainDocumentPart();
+        ObjectFactory factory = Context.getWmlObjectFactory();
+        for (String text : texts) {
+            P paragraph = factory.createP();
+            paragraph.getContent().add(runWithText(factory, text));
+            main.addObject(paragraph);
+        }
+        return pkg;
+    }
+
+    public static void writeParagraphs(Path path, String... texts) throws Exception {
+        paragraphs(texts).save(path.toFile());
+    }
+
     public static WordprocessingMLPackage multiRunParagraph(String part1, String part2) throws Exception {
         WordprocessingMLPackage pkg = WordprocessingMLPackage.createPackage();
         MainDocumentPart main = pkg.getMainDocumentPart();

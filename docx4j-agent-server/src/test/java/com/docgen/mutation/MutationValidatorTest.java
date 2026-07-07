@@ -1,6 +1,8 @@
 package com.docgen.mutation;
 
 import com.docgen.model.BlockDescriptor;
+import com.docgen.model.DeleteMutation;
+import com.docgen.model.InsertMutation;
 import com.docgen.model.ModifyMutation;
 import com.docgen.model.Mutation;
 import com.docgen.model.MutationBatch;
@@ -73,6 +75,73 @@ class MutationValidatorTest {
 
         List<MutationValidator.ValidationError> errors = validator.validate(batch, index);
         assertEquals("EMPTY_BATCH", errors.getFirst().code());
+    }
+
+    @Test
+    void noOpModifyRejected() {
+        MutationBatch batch = batch(modify("dg_p0", "Hello", "Hello"));
+
+        List<MutationValidator.ValidationError> errors = validator.validate(batch, index);
+        assertEquals("NO_OP_MUTATION", errors.getFirst().code());
+    }
+
+    @Test
+    void insertOnTableCellAnchorRejected() {
+        StructuralIndex tableIndex = new StructuralIndex("doc.docx", List.of(
+                new BlockDescriptor("dg_tbl0_r0_c0", "table_cell", "R0C0", 4, 1, 0, "Normal", 0, 0, 0)));
+        MutationBatch batch = batch(
+                new InsertMutation("insert", "dg_tbl0_r0_c0", "after", "paragraph", "x", null));
+
+        List<MutationValidator.ValidationError> errors = validator.validate(batch, tableIndex);
+        assertEquals("UNSUPPORTED_ANCHOR", errors.getFirst().code());
+    }
+
+    @Test
+    void insertWithBadPositionRejected() {
+        MutationBatch batch = batch(
+                new InsertMutation("insert", "dg_p0", "above", "paragraph", "x", null));
+
+        List<MutationValidator.ValidationError> errors = validator.validate(batch, index);
+        assertEquals("BAD_POSITION", errors.getFirst().code());
+    }
+
+    @Test
+    void insertAnchoredOnDeletedBlockRejected() {
+        MutationBatch batch = batch(
+                new DeleteMutation("delete", "dg_p0"),
+                new InsertMutation("insert", "dg_p0", "after", "paragraph", "x", null));
+
+        List<MutationValidator.ValidationError> errors = validator.validate(batch, index);
+        assertEquals("ANCHOR_DELETED", errors.getFirst().code());
+    }
+
+    @Test
+    void deleteTableCellRejected() {
+        StructuralIndex tableIndex = new StructuralIndex("doc.docx", List.of(
+                new BlockDescriptor("dg_tbl0_r0_c0", "table_cell", "R0C0", 4, 1, 0, "Normal", 0, 0, 0)));
+        MutationBatch batch = batch(new DeleteMutation("delete", "dg_tbl0_r0_c0"));
+
+        List<MutationValidator.ValidationError> errors = validator.validate(batch, tableIndex);
+        assertEquals("UNSUPPORTED_DELETE", errors.getFirst().code());
+    }
+
+    @Test
+    void modifyAndDeleteSameTargetRejected() {
+        MutationBatch batch = batch(
+                modify("dg_p0", "Hello", "Hi"),
+                new DeleteMutation("delete", "dg_p0"));
+
+        List<MutationValidator.ValidationError> errors = validator.validate(batch, index);
+        assertEquals("DUPLICATE_TARGET", errors.getFirst().code());
+    }
+
+    @Test
+    void validMixedBatchHasNoErrors() {
+        MutationBatch batch = batch(
+                modify("dg_p0", "Hello", "Hi"),
+                new InsertMutation("insert", "dg_p0", "after", "paragraph", "New paragraph", null));
+
+        assertTrue(validator.validate(batch, index).isEmpty());
     }
 
     private static ModifyMutation modify(String targetId, String oldText, String newText) {

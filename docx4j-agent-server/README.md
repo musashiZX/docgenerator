@@ -12,7 +12,8 @@ Then open the **test console UI**: <http://localhost:8081/>
 
 - Upload a `.docx` (or drop one into `docx4j-agent-server/docs/`)
 - Inspect the block index (`target_id`, type, style, run/char counts, text)
-- Click blocks to stage `modify` mutations, edit `old_text` / `new_text`, apply the batch
+- Per block row: **Edit** stages a modify; **+&#8593;/+&#8595;** stage a paragraph insert
+  before/after; **Del** stages a paragraph delete (paragraph blocks only)
 - Changed blocks flash green; validation errors and rollbacks appear in the activity log
 - Download the result to verify formatting in Word
 
@@ -63,8 +64,9 @@ mvn test
 
 ## Status
 
-**Stage 3 complete** (through S3.4): bookmarks + structural index (Stage 1); run-preserving
-`modify` engine — `BlockTextIndex`, `RunEditor`, `ModifyApplier` (Stage 2); safety layer —
-`MutationValidator`, `NodeHashGuard`, `MutationApplier` orchestration, dev apply endpoint
-(Stage 3). Plus, pulled forward from Stage 7: document list/upload/download endpoints and a
-static test console UI at `/`. Next: Stage 4 insert/delete.
+**Stage 4 complete** (through S4.4): bookmarks + structural index (Stage 1); run-preserving
+`modify` engine (Stage 2); validator + hash-guard safety layer (Stage 3); `insert` and
+`delete` for body paragraphs — `InsertApplier` clones the anchor's `pPr` and allocates the
+next free `dg_p*` bookmark, `DeleteApplier` removes by bookmark, table cells are protected
+(Stage 4). Plus, pulled forward from Stage 7: document list/upload/download endpoints and
+the test console UI at `/`. Next: Stage 5 propose/approve workflow.

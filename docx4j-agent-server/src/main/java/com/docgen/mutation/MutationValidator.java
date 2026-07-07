@@ -1,6 +1,8 @@
 package com.docgen.mutation;
 
 import com.docgen.model.BlockDescriptor;
+import com.docgen.model.DeleteMutation;
+import com.docgen.model.InsertMutation;
 import com.docgen.model.ModifyMutation;
 import com.docgen.model.Mutation;
 import com.docgen.model.MutationBatch;
@@ -33,19 +35,25 @@ public class MutationValidator {
             return errors;
         }
 
-        Map<String, String> blockTexts = new HashMap<>();
+        Map<String, BlockDescriptor> blocks = new HashMap<>();
         for (BlockDescriptor block : index.blocks()) {
-            blockTexts.put(block.targetId(), block.text());
+            blocks.put(block.targetId(), block);
         }
 
+        // One content mutation (modify/delete) per target id; inserts have their
+        // own anchor+position uniqueness and may not anchor on a deleted block.
         Set<String> seenTargets = new HashSet<>();
+        Set<String> deletedTargets = new HashSet<>();
+        Set<String> seenAnchors = new HashSet<>();
+
         for (int i = 0; i < batch.mutations().size(); i++) {
             Mutation mutation = batch.mutations().get(i);
-            if (mutation instanceof ModifyMutation modify) {
-                validateModify(i, modify, blockTexts, seenTargets, errors);
-            } else {
-                errors.add(new ValidationError(i, "UNSUPPORTED_OP",
-                        "Unsupported op: " + mutation.op()));
+            switch (mutation) {
+                case ModifyMutation modify -> validateModify(i, modify, blocks, seenTargets, errors);
+                case InsertMutation insert ->
+                        validateInsert(i, insert, blocks, seenAnchors, deletedTargets, errors);
+                case DeleteMutation delete ->
+                        validateDelete(i, delete, blocks, seenTargets, deletedTargets, errors);
             }
         }
         return errors;
@@ -54,7 +62,7 @@ public class MutationValidator {
     private static void validateModify(
             int i,
             ModifyMutation modify,
-            Map<String, String> blockTexts,
+            Map<String, BlockDescriptor> blocks,
             Set<String> seenTargets,
             List<ValidationError> errors) {
 
@@ -63,7 +71,7 @@ public class MutationValidator {
             errors.add(new ValidationError(i, "MISSING_TARGET", "target_id is required"));
             return;
         }
-        if (!blockTexts.containsKey(targetId)) {
+        if (!blocks.containsKey(targetId)) {
             errors.add(new ValidationError(i, "UNKNOWN_TARGET",
                     "target_id not in this document's index: " + targetId));
             return;
@@ -81,17 +89,105 @@ public class MutationValidator {
             errors.add(new ValidationError(i, "MISSING_NEW_TEXT", "new_text is required"));
             return;
         }
+        if (modify.newText().equals(modify.oldText())) {
+            errors.add(new ValidationError(i, "NO_OP_MUTATION",
+                    "new_text equals old_text for " + targetId
+                            + " — a modify must change the text (the hash guard rejects no-ops)"));
+            return;
+        }
         int occurrence = modify.occurrenceOrDefault();
         if (occurrence < 0) {
             errors.add(new ValidationError(i, "BAD_OCCURRENCE", "occurrence must be >= 0"));
             return;
         }
-        String blockText = blockTexts.get(targetId);
+        String blockText = blocks.get(targetId).text();
         if (countOccurrences(blockText, modify.oldText()) <= occurrence) {
             errors.add(new ValidationError(i, "OLD_TEXT_NOT_FOUND",
                     "old_text (occurrence " + occurrence + ") not found in " + targetId
                             + ": \"" + modify.oldText() + "\""));
         }
+    }
+
+    private static void validateInsert(
+            int i,
+            InsertMutation insert,
+            Map<String, BlockDescriptor> blocks,
+            Set<String> seenAnchors,
+            Set<String> deletedTargets,
+            List<ValidationError> errors) {
+
+        String anchorId = insert.anchorId();
+        if (anchorId == null || anchorId.isBlank()) {
+            errors.add(new ValidationError(i, "MISSING_ANCHOR", "anchor_id is required"));
+            return;
+        }
+        BlockDescriptor anchor = blocks.get(anchorId);
+        if (anchor == null) {
+            errors.add(new ValidationError(i, "UNKNOWN_TARGET",
+                    "anchor_id not in this document's index: " + anchorId));
+            return;
+        }
+        if (!"paragraph".equals(anchor.type())) {
+            errors.add(new ValidationError(i, "UNSUPPORTED_ANCHOR",
+                    "Insert anchors must be body paragraphs, not " + anchor.type() + ": " + anchorId));
+            return;
+        }
+        if (deletedTargets.contains(anchorId)) {
+            errors.add(new ValidationError(i, "ANCHOR_DELETED",
+                    "Cannot anchor an insert on a block deleted in the same batch: " + anchorId));
+            return;
+        }
+        if (!"before".equals(insert.position()) && !"after".equals(insert.position())) {
+            errors.add(new ValidationError(i, "BAD_POSITION",
+                    "position must be \"before\" or \"after\", got: " + insert.position()));
+            return;
+        }
+        if (insert.nodeType() != null && !"paragraph".equals(insert.nodeType())) {
+            errors.add(new ValidationError(i, "UNSUPPORTED_NODE_TYPE",
+                    "Only node_type \"paragraph\" is supported in v1, got: " + insert.nodeType()));
+            return;
+        }
+        if (insert.text() == null) {
+            errors.add(new ValidationError(i, "MISSING_TEXT", "text is required for insert"));
+            return;
+        }
+        if (!seenAnchors.add(anchorId + "#" + insert.position())) {
+            errors.add(new ValidationError(i, "DUPLICATE_ANCHOR",
+                    "At most one insert per anchor+position per batch: "
+                            + anchorId + " " + insert.position()));
+        }
+    }
+
+    private static void validateDelete(
+            int i,
+            DeleteMutation delete,
+            Map<String, BlockDescriptor> blocks,
+            Set<String> seenTargets,
+            Set<String> deletedTargets,
+            List<ValidationError> errors) {
+
+        String targetId = delete.targetId();
+        if (targetId == null || targetId.isBlank()) {
+            errors.add(new ValidationError(i, "MISSING_TARGET", "target_id is required"));
+            return;
+        }
+        BlockDescriptor block = blocks.get(targetId);
+        if (block == null) {
+            errors.add(new ValidationError(i, "UNKNOWN_TARGET",
+                    "target_id not in this document's index: " + targetId));
+            return;
+        }
+        if (!"paragraph".equals(block.type())) {
+            errors.add(new ValidationError(i, "UNSUPPORTED_DELETE",
+                    "Only body paragraphs can be deleted in v1, not " + block.type() + ": " + targetId));
+            return;
+        }
+        if (!seenTargets.add(targetId)) {
+            errors.add(new ValidationError(i, "DUPLICATE_TARGET",
+                    "At most one mutation per target_id per batch: " + targetId));
+            return;
+        }
+        deletedTargets.add(targetId);
     }
 
     private static int countOccurrences(String haystack, String needle) {

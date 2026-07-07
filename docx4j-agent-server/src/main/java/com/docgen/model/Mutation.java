@@ -10,9 +10,11 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
         property = "op",
         visible = true)
 @JsonSubTypes({
-        @JsonSubTypes.Type(value = ModifyMutation.class, name = "modify")
+        @JsonSubTypes.Type(value = ModifyMutation.class, name = "modify"),
+        @JsonSubTypes.Type(value = InsertMutation.class, name = "insert"),
+        @JsonSubTypes.Type(value = DeleteMutation.class, name = "delete")
 })
-public sealed interface Mutation permits ModifyMutation {
+public sealed interface Mutation permits ModifyMutation, InsertMutation, DeleteMutation {
 
     String op();
 }

@@ -56,7 +56,7 @@ body {
 /* ---------- layout ---------- */
 .layout {
   display: grid;
-  grid-template-columns: 270px 1fr 400px;
+  grid-template-columns: 270px 1fr 520px;
   gap: 14px;
   padding: 14px;
   flex: 1;
@@ -171,9 +171,21 @@ table.blocks tr.flash-changed { animation: flash 1.6s ease-out; }
 .tag.cell { background: #fdf4ff; color: #a21caf; }
 .block-text { max-width: 480px; word-break: break-word; }
 .block-text.empty { color: var(--muted); font-style: italic; }
+.num-underline {
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-decoration-color: #1d4fd8;
+}
+.row-actions { display: flex; gap: 4px; }
+.row-actions .btn { padding: 2px 7px; font-size: 11.5px; white-space: nowrap; }
 
 /* ---------- composer ---------- */
 .composer { overflow-y: auto; }
+.quick-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
 .mutation-card {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -187,6 +199,32 @@ table.blocks tr.flash-changed { animation: flash 1.6s ease-out; }
   align-items: center;
   margin-bottom: 8px;
 }
+.mutation-card.op-insert { border-left: 3px solid var(--green); }
+.mutation-card.op-delete { border-left: 3px solid var(--red); }
+.mutation-card.op-modify { border-left: 3px solid var(--accent); }
+.op-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.op-badge.modify { background: var(--accent-soft); color: var(--accent); }
+.op-badge.insert { background: var(--green-soft); color: var(--green); }
+.op-badge.delete { background: var(--red-soft); color: var(--red); }
+.muted { color: var(--muted); }
+.field select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  background: #fff;
+}
+.field select:focus { outline: none; border-color: var(--accent); }
 .field { margin-bottom: 8px; }
 .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
 .field input[type="text"], .field input[type="number"], .field textarea {
@@ -220,7 +258,18 @@ table.blocks tr.flash-changed { animation: flash 1.6s ease-out; }
 
 /* ---------- log ---------- */
 .log-head { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; }
-.log { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; min-height: 60px; }
+.log {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 260px;
+  max-height: 44vh;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  background: #f8fafc;
+}
 .log-entry {
   border-left: 3px solid var(--border);
   border-radius: 4px;

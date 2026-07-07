@@ -1,6 +1,5 @@
 package com.docgen.index;
 
-import org.docx4j.TextUtils;
 import org.docx4j.wml.P;
 import org.docx4j.wml.Tc;
 
@@ -10,7 +9,9 @@ public final class PlainTextExtractor {
     private PlainTextExtractor() {}
 
     public static String extractFromParagraph(P paragraph) throws Exception {
-        return TextUtils.getText(paragraph);
+        // Keep UI/index text identical to what ModifyApplier searches over,
+        // so old_text copied from index always matches apply-time text model.
+        return BlockTextIndex.of(paragraph).fullText();
     }
 
     /** v1: first paragraph in the cell only. */

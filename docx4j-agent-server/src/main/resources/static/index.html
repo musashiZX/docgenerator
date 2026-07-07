@@ -44,7 +44,9 @@
       </div>
       <p class="hint" id="index-hint">
         Upload or pick a document on the left. Its block index (with stable
-        <code>target_id</code>s) will appear here. Click a block to stage a modification.
+        <code>target_id</code>s) will appear here. Use <b>Edit</b> to stage a text change,
+        <b>+&#8593;</b>/<b>+&#8595;</b> to insert a paragraph before/after, and <b>Del</b>
+        to delete a paragraph (paragraphs only — table cells support Edit).
       </p>
       <div class="table-wrap" id="table-wrap" hidden>
         <table class="blocks">
@@ -57,6 +59,7 @@
               <th class="num">runs</th>
               <th class="num">chars</th>
               <th>text</th>
+              <th>actions</th>
             </tr>
           </thead>
           <tbody id="blocks-body"></tbody>
@@ -70,7 +73,10 @@
         <h2>Mutation batch</h2>
         <button class="btn ghost sm" id="btn-clear-batch" title="Clear batch">Clear</button>
       </div>
-      <p class="hint" id="composer-hint">Click a block in the index to add a modify mutation.</p>
+      <p class="hint" id="composer-hint">Use the action buttons on a block row to stage modify, insert, or delete mutations.</p>
+      <div class="quick-actions">
+        <button class="btn ghost sm" id="btn-stage-all-comma">Stage comma for all blocks</button>
+      </div>
       <div id="mutation-cards"></div>
 
       <div class="field">

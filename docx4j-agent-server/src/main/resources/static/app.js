@@ -5,13 +5,17 @@ const state = {
   docs: [],
   currentDoc: null,
   blocks: [],
-  mutations: [], // { targetId, oldText, occurrence, newText }
+  // modify: { op:"modify", targetId, oldText, occurrence, newText }
+  // insert: { op:"insert", anchorId, position, text, style }
+  // delete: { op:"delete", targetId }
+  mutations: [],
 };
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const markNumbers = (s) => esc(s).replace(/(\d+)/g, "<span class=\"num-underline\">$1</span>");
 
 /* ============ activity log ============ */
 function log(kind, html) {
@@ -103,7 +107,8 @@ async function loadIndex(flashIds) {
 function renderBlocks(flashIds) {
   const tbody = $("blocks-body");
   tbody.innerHTML = "";
-  const staged = new Set(state.mutations.map((m) => m.targetId));
+  const staged = new Set(
+    state.mutations.map((m) => m.op === "insert" ? m.anchorId : m.targetId));
   for (const block of state.blocks) {
     const tr = document.createElement("tr");
     if (staged.has(block.target_id)) tr.classList.add("staged");
@@ -112,8 +117,18 @@ function renderBlocks(flashIds) {
       ? `<span class="tag cell">cell ${block.row},${block.col}</span>`
       : `<span class="tag">para</span>`;
     const text = block.text
-      ? `<span class="block-text">${esc(block.text)}</span>`
+      ? `<span class="block-text">${markNumbers(block.text)}</span>`
       : `<span class="block-text empty">(empty)</span>`;
+    const isParagraph = block.type === "paragraph";
+    const actions =
+      `<div class="row-actions">` +
+      `<button class="btn ghost sm" data-act="modify" title="Stage modify">Edit</button>` +
+      (isParagraph
+        ? `<button class="btn ghost sm" data-act="insert-before" title="Insert paragraph before">+&#8593;</button>` +
+          `<button class="btn ghost sm" data-act="insert-after" title="Insert paragraph after">+&#8595;</button>` +
+          `<button class="btn ghost sm danger-text" data-act="delete" title="Stage delete">Del</button>`
+        : "") +
+      `</div>`;
     tr.innerHTML =
       `<td class="num">${block.ordinal}</td>` +
       `<td><span class="tid">${esc(block.target_id)}</span></td>` +
@@ -121,17 +136,28 @@ function renderBlocks(flashIds) {
       `<td><span class="tag">${esc(block.style)}</span></td>` +
       `<td class="num">${block.run_count}</td>` +
       `<td class="num">${block.char_count}</td>` +
-      `<td>${text}</td>`;
-    tr.title = "Click to stage a modify mutation for this block";
-    tr.onclick = () => stageMutation(block);
+      `<td>${text}</td>` +
+      `<td>${actions}</td>`;
+    tr.querySelector('[data-act="modify"]').onclick = () => stageModify(block);
+    const before = tr.querySelector('[data-act="insert-before"]');
+    if (before) before.onclick = () => stageInsert(block, "before");
+    const after = tr.querySelector('[data-act="insert-after"]');
+    if (after) after.onclick = () => stageInsert(block, "after");
+    const del = tr.querySelector('[data-act="delete"]');
+    if (del) del.onclick = () => stageDelete(block);
     tbody.appendChild(tr);
   }
 }
 
 /* ============ mutation composer ============ */
-function stageMutation(block) {
-  if (state.mutations.some((m) => m.targetId === block.target_id)) {
-    log("err", `<code>${esc(block.target_id)}</code> is already staged — one mutation per block per batch.`);
+function hasContentMutation(targetId) {
+  return state.mutations.some(
+    (m) => (m.op === "modify" || m.op === "delete") && m.targetId === targetId);
+}
+
+function stageModify(block) {
+  if (hasContentMutation(block.target_id)) {
+    log("err", `<code>${esc(block.target_id)}</code> is already staged — one modify/delete per block per batch.`);
     return;
   }
   if (!block.text) {
@@ -139,11 +165,45 @@ function stageMutation(block) {
     return;
   }
   state.mutations.push({
+    op: "modify",
     targetId: block.target_id,
     oldText: block.text,
     occurrence: 0,
     newText: block.text,
   });
+  renderBatch();
+}
+
+function stageInsert(block, position) {
+  if (block.type !== "paragraph") {
+    log("err", "Inserts can only anchor on body paragraphs in v1.");
+    return;
+  }
+  if (state.mutations.some(
+      (m) => m.op === "insert" && m.anchorId === block.target_id && m.position === position)) {
+    log("err", `An insert ${position} <code>${esc(block.target_id)}</code> is already staged.`);
+    return;
+  }
+  state.mutations.push({
+    op: "insert",
+    anchorId: block.target_id,
+    position,
+    text: "",
+    style: "",
+  });
+  renderBatch();
+}
+
+function stageDelete(block) {
+  if (block.type !== "paragraph") {
+    log("err", "Only body paragraphs can be deleted in v1.");
+    return;
+  }
+  if (hasContentMutation(block.target_id)) {
+    log("err", `<code>${esc(block.target_id)}</code> is already staged — one modify/delete per block per batch.`);
+    return;
+  }
+  state.mutations.push({ op: "delete", targetId: block.target_id });
   renderBatch();
 }
 
@@ -155,18 +215,43 @@ function renderBatch() {
 
   state.mutations.forEach((m, i) => {
     const card = document.createElement("div");
-    card.className = "mutation-card";
-    card.innerHTML =
-      `<div class="card-head"><span class="tid">${esc(m.targetId)}</span>` +
-      `<button class="btn ghost sm danger-text" data-remove="${i}">Remove</button></div>` +
-      `<div class="field"><label>old_text (must match current text — the lock)</label>` +
-      `<textarea data-field="oldText" data-i="${i}">${esc(m.oldText)}</textarea></div>` +
-      `<div class="field-row">` +
-      `<div class="field narrow"><label>occurrence</label>` +
-      `<input type="number" min="0" value="${m.occurrence}" data-field="occurrence" data-i="${i}"></div>` +
-      `<div class="field"><label>new_text (replacement)</label>` +
-      `<textarea data-field="newText" data-i="${i}">${esc(m.newText)}</textarea></div>` +
-      `</div>`;
+    card.className = `mutation-card op-${m.op}`;
+    if (m.op === "modify") {
+      card.innerHTML =
+        `<div class="card-head"><span><span class="op-badge modify">modify</span> ` +
+        `<span class="tid">${esc(m.targetId)}</span></span>` +
+        `<button class="btn ghost sm danger-text" data-remove="${i}">Remove</button></div>` +
+        `<div class="field"><label>old_text (must match current text — the lock)</label>` +
+        `<textarea data-field="oldText" data-i="${i}">${esc(m.oldText)}</textarea></div>` +
+        `<div class="field-row">` +
+        `<div class="field narrow"><label>occurrence</label>` +
+        `<input type="number" min="0" value="${m.occurrence}" data-field="occurrence" data-i="${i}"></div>` +
+        `<div class="field"><label>new_text (replacement)</label>` +
+        `<textarea data-field="newText" data-i="${i}">${esc(m.newText)}</textarea></div>` +
+        `</div>`;
+    } else if (m.op === "insert") {
+      card.innerHTML =
+        `<div class="card-head"><span><span class="op-badge insert">insert</span> ` +
+        `<span class="muted">${esc(m.position)}</span> <span class="tid">${esc(m.anchorId)}</span></span>` +
+        `<button class="btn ghost sm danger-text" data-remove="${i}">Remove</button></div>` +
+        `<div class="field-row">` +
+        `<div class="field narrow"><label>position</label>` +
+        `<select data-field="position" data-i="${i}">` +
+        `<option value="before"${m.position === "before" ? " selected" : ""}>before</option>` +
+        `<option value="after"${m.position === "after" ? " selected" : ""}>after</option>` +
+        `</select></div>` +
+        `<div class="field"><label>style (optional, e.g. BodyText — empty = copy anchor)</label>` +
+        `<input type="text" value="${esc(m.style)}" data-field="style" data-i="${i}"></div>` +
+        `</div>` +
+        `<div class="field"><label>text of the new paragraph</label>` +
+        `<textarea data-field="text" data-i="${i}" placeholder="Type the new paragraph text…">${esc(m.text)}</textarea></div>`;
+    } else {
+      card.innerHTML =
+        `<div class="card-head"><span><span class="op-badge delete">delete</span> ` +
+        `<span class="tid">${esc(m.targetId)}</span></span>` +
+        `<button class="btn ghost sm danger-text" data-remove="${i}">Remove</button></div>` +
+        `<p class="hint">This paragraph will be removed entirely.</p>`;
+    }
     wrap.appendChild(card);
   });
 
@@ -178,12 +263,14 @@ function renderBatch() {
     };
   });
   wrap.querySelectorAll("[data-field]").forEach((input) => {
-    input.oninput = () => {
+    const handler = () => {
       const m = state.mutations[Number(input.dataset.i)];
       m[input.dataset.field] =
         input.dataset.field === "occurrence" ? Number(input.value) : input.value;
       refreshJsonPreview();
     };
+    input.oninput = handler;
+    input.onchange = handler; // <select> fires change, not input, in some browsers
   });
 
   renderBlocks([]);
@@ -194,14 +281,51 @@ function buildBatch() {
   return {
     schema_version: 1,
     explanation: $("explanation").value || undefined,
-    mutations: state.mutations.map((m) => ({
-      op: "modify",
-      target_id: m.targetId,
-      old_text: m.oldText,
-      occurrence: m.occurrence,
-      new_text: m.newText,
-    })),
+    mutations: state.mutations.map((m) => {
+      if (m.op === "insert") {
+        return {
+          op: "insert",
+          anchor_id: m.anchorId,
+          position: m.position,
+          node_type: "paragraph",
+          text: m.text,
+          style: m.style || undefined,
+        };
+      }
+      if (m.op === "delete") {
+        return { op: "delete", target_id: m.targetId };
+      }
+      return {
+        op: "modify",
+        target_id: m.targetId,
+        old_text: m.oldText,
+        occurrence: m.occurrence,
+        new_text: m.newText,
+      };
+    }),
   };
+}
+
+function stageCommaForAllBlocks() {
+  if (!state.currentDoc) {
+    log("err", "Select a document first.");
+    return;
+  }
+  state.mutations = [];
+  for (const block of state.blocks) {
+    const text = block.text || "";
+    if (!text.trim()) continue;
+    if (text.endsWith(",")) continue; // avoid targeting blocks with no effective text change
+    state.mutations.push({
+      op: "modify",
+      targetId: block.target_id,
+      oldText: text,
+      occurrence: 0,
+      newText: `${text},`,
+    });
+  }
+  renderBatch();
+  log("ok", `Staged ${state.mutations.length} comma-appends across non-empty blocks.`);
 }
 
 function refreshJsonPreview() {
@@ -220,13 +344,19 @@ async function applyBatch() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(batch),
     });
+    const traceId = res.headers.get("X-Trace-Id");
     const body = await res.json();
 
     if (res.ok) {
       const ids = body.changed_ids || [];
+      const created = body.created_ids || [];
       log("ok",
         `Applied ${body.applied_count} mutation(s). Changed: ` +
-        ids.map((id) => `<code>${esc(id)}</code>`).join(", "));
+        ids.map((id) => `<code>${esc(id)}</code>`).join(", ") +
+        (created.length
+          ? `<br>New blocks: ${created.map((id) => `<code>${esc(id)}</code>`).join(", ")}`
+          : "") +
+        (traceId ? `<br><small>trace_id: <code>${esc(traceId)}</code></small>` : ""));
       state.mutations = [];
       $("explanation").value = "";
       renderBatch();
@@ -236,10 +366,20 @@ async function applyBatch() {
         .map((d) => `<li>[#${d.mutation_index}] <b>${esc(d.code)}</b> — ${esc(d.message)}</li>`)
         .join("");
       log("err", `Validation failed (HTTP ${res.status}):<ul>${items}</ul>Document not modified.`);
+    } else if (body.error === "invariant_violation") {
+      const missing = body.missing_targeted_ids || [];
+      const unexpected = body.unexpected_changed_ids || [];
+      log("err",
+        `Invariant violation (HTTP ${res.status}). Batch rolled back.<br>` +
+        `Missing targeted changes: ${missing.length ? missing.map((id) => `<code>${esc(id)}</code>`).join(", ") : "(none)"}<br>` +
+        `Unexpected changed ids: ${unexpected.length ? unexpected.map((id) => `<code>${esc(id)}</code>`).join(", ") : "(none)"}<br>` +
+        (traceId ? `<small>trace_id: <code>${esc(traceId)}</code></small>` : ""));
+      await loadIndex();
     } else {
       log("err",
         `Rejected (HTTP ${res.status}): ${esc(body.error || body.message || "unknown error")}. ` +
-        `Batch rolled back — document unchanged.`);
+        `Batch rolled back — document unchanged.` +
+        (traceId ? `<br><small>trace_id: <code>${esc(traceId)}</code></small>` : ""));
       await loadIndex();
     }
   } catch (e) {
@@ -255,6 +395,7 @@ $("btn-refresh-index").onclick = () => loadIndex();
 $("btn-clear-batch").onclick = () => { state.mutations = []; renderBatch(); };
 $("btn-apply").onclick = applyBatch;
 $("btn-clear-log").onclick = () => { $("log").innerHTML = ""; };
+$("btn-stage-all-comma").onclick = stageCommaForAllBlocks;
 $("btn-toggle-json").onclick = () => {
   const pre = $("json-preview");
   pre.hidden = !pre.hidden;

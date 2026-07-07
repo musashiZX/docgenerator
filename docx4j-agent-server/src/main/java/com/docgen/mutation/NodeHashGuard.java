@@ -107,5 +107,17 @@ public class NodeHashGuard {
         public Set<String> targetedIds() {
             return targetedIds;
         }
+
+        public Set<String> missingTargetedIds() {
+            Set<String> missing = new HashSet<>(targetedIds);
+            missing.removeAll(changedIds);
+            return missing;
+        }
+
+        public Set<String> unexpectedChangedIds() {
+            Set<String> extra = new HashSet<>(changedIds);
+            extra.removeAll(targetedIds);
+            return extra;
+        }
     }
 }

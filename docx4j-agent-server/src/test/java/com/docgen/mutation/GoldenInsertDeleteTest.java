@@ -22,22 +22,22 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * Golden scenario: input.docx + mutation.json → expected-text.json.
- * Text-per-id comparison for now; binary/XML docx comparison comes with
- * the Stage 6 parity harness.
+ * Golden scenario for insert + delete: the resulting id → text map must match
+ * expected-text.json exactly (strict equality also proves the deleted block is gone).
  */
-class GoldenModifyTest {
+class GoldenInsertDeleteTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final StructuralIndexBuilder indexBuilder = new StructuralIndexBuilder();
 
     @Test
-    void modifyCellScenarioMatchesExpectedTexts() throws Exception {
+    void insertDeleteScenarioMatchesExpectedTexts() throws Exception {
         Path goldenDir = FixtureGeneratorTest.moduleRoot()
-                .resolve("src/test/resources/golden/modify-cell");
+                .resolve("src/test/resources/golden/insert-delete");
         Path inputDocx = goldenDir.resolve("input.docx");
         if (!Files.exists(inputDocx)) {
-            FixtureFactory.writeTable3x3(inputDocx);
+            Files.createDirectories(goldenDir);
+            FixtureFactory.writeParagraphs(inputDocx, "Alpha", "Bravo", "Charlie");
         }
 
         MutationBatch batch = mapper.readValue(
@@ -63,9 +63,6 @@ class GoldenModifyTest {
         for (BlockDescriptor block : indexBuilder.build(session.document(), "input.docx").blocks()) {
             actual.put(block.targetId(), block.text());
         }
-        for (Map.Entry<String, String> entry : expected.entrySet()) {
-            assertEquals(entry.getValue(), actual.get(entry.getKey()),
-                    "text mismatch for " + entry.getKey());
-        }
+        assertEquals(expected, actual, "full id→text map must match (deleted block absent)");
     }
 }

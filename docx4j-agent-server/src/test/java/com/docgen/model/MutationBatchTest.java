@@ -38,6 +38,45 @@ class MutationBatchTest {
     }
 
     @Test
+    void parsesInsertAndDeleteMutations() throws Exception {
+        String json = """
+                {
+                  "schema_version": 1,
+                  "explanation": "Add a note and drop an obsolete paragraph.",
+                  "mutations": [
+                    {
+                      "op": "insert",
+                      "anchor_id": "dg_p1",
+                      "position": "after",
+                      "node_type": "paragraph",
+                      "text": "New note paragraph.",
+                      "style": "BodyText"
+                    },
+                    { "op": "delete", "target_id": "dg_p2" }
+                  ]
+                }
+                """;
+
+        MutationBatch batch = mapper.readValue(json, MutationBatch.class);
+
+        InsertMutation insert = assertInstanceOf(InsertMutation.class, batch.mutations().get(0));
+        assertEquals("dg_p1", insert.anchorId());
+        assertEquals("after", insert.position());
+        assertEquals("New note paragraph.", insert.text());
+        assertEquals("BodyText", insert.style());
+
+        DeleteMutation delete = assertInstanceOf(DeleteMutation.class, batch.mutations().get(1));
+        assertEquals("dg_p2", delete.targetId());
+
+        // round-trip: serialize and parse again
+        String serialized = mapper.writeValueAsString(batch);
+        MutationBatch reparsed = mapper.readValue(serialized, MutationBatch.class);
+        assertEquals(2, reparsed.mutations().size());
+        assertInstanceOf(InsertMutation.class, reparsed.mutations().get(0));
+        assertInstanceOf(DeleteMutation.class, reparsed.mutations().get(1));
+    }
+
+    @Test
     void occurrenceDefaultsToZeroWhenOmitted() throws Exception {
         String json = """
                 {
