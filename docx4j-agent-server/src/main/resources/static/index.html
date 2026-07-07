@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>docx4j Agent Console</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-badge">docx4j</span>
+      <h1>Agent Console</h1>
+    </div>
+    <div class="health" id="health">
+      <span class="dot" id="health-dot"></span>
+      <span id="health-text">checking…</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- ============ Documents sidebar ============ -->
+    <aside class="panel sidebar">
+      <div class="panel-head">
+        <h2>Documents</h2>
+        <button class="btn ghost sm" id="btn-refresh-docs" title="Refresh list">&#8635;</button>
+      </div>
+      <label class="upload-zone" id="upload-zone">
+        <input type="file" id="file-input" accept=".docx" hidden>
+        <span class="upload-icon">&#8679;</span>
+        <span>Drop a <b>.docx</b> here<br>or click to upload</span>
+      </label>
+      <ul class="doc-list" id="doc-list"></ul>
+    </aside>
+
+    <!-- ============ Structural index ============ -->
+    <section class="panel main">
+      <div class="panel-head">
+        <h2 id="doc-title">Select a document</h2>
+        <div class="head-actions" id="doc-actions" hidden>
+          <button class="btn ghost sm" id="btn-refresh-index">&#8635; Re-index</button>
+          <a class="btn ghost sm" id="btn-download" href="#" download>&#8681; Download</a>
+        </div>
+      </div>
+      <p class="hint" id="index-hint">
+        Upload or pick a document on the left. Its block index (with stable
+        <code>target_id</code>s) will appear here. Click a block to stage a modification.
+      </p>
+      <div class="table-wrap" id="table-wrap" hidden>
+        <table class="blocks">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>target_id</th>
+              <th>type</th>
+              <th>style</th>
+              <th class="num">runs</th>
+              <th class="num">chars</th>
+              <th>text</th>
+            </tr>
+          </thead>
+          <tbody id="blocks-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============ Mutation composer ============ -->
+    <aside class="panel composer">
+      <div class="panel-head">
+        <h2>Mutation batch</h2>
+        <button class="btn ghost sm" id="btn-clear-batch" title="Clear batch">Clear</button>
+      </div>
+      <p class="hint" id="composer-hint">Click a block in the index to add a modify mutation.</p>
+      <div id="mutation-cards"></div>
+
+      <div class="field">
+        <label for="explanation">Explanation</label>
+        <input type="text" id="explanation" placeholder="Why this batch? (optional)">
+      </div>
+
+      <div class="composer-actions">
+        <button class="btn primary" id="btn-apply" disabled>Apply batch</button>
+        <button class="btn ghost" id="btn-toggle-json">View JSON</button>
+      </div>
+      <pre class="json-preview" id="json-preview" hidden></pre>
+
+      <div class="panel-head log-head">
+        <h2>Activity</h2>
+        <button class="btn ghost sm" id="btn-clear-log">Clear</button>
+      </div>
+      <div class="log" id="log"></div>
+    </aside>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

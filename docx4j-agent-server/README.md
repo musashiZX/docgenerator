@@ -6,17 +6,25 @@ ID-based Word document mutation service (docx4j). See [`../docs/DOCX4J_IMPLEMENT
 
 ```bash
 mvn spring-boot:run
-# http://localhost:8081/api/health
-# http://localhost:8081/api/documents/{name}/index
 ```
 
-Copy a `.docx` into `docx4j-agent-server/docs/` then:
+Then open the **test console UI**: <http://localhost:8081/>
 
-```powershell
-Invoke-RestMethod http://localhost:8081/api/documents/your-file.docx/index | ConvertTo-Json -Depth 6
-```
+- Upload a `.docx` (or drop one into `docx4j-agent-server/docs/`)
+- Inspect the block index (`target_id`, type, style, run/char counts, text)
+- Click blocks to stage `modify` mutations, edit `old_text` / `new_text`, apply the batch
+- Changed blocks flash green; validation errors and rollbacks appear in the activity log
+- Download the result to verify formatting in Word
 
-Each block in the JSON shows its **identity** (`target_id`, `type`, table coords) and **size** (`char_count`, `run_count`, `ordinal`).
+Raw API endpoints:
+
+- `GET  /api/health`
+- `GET  /api/documents` — list
+- `POST /api/documents/upload` — multipart `.docx`
+- `GET  /api/documents/{name}/index` — structural block index
+- `GET  /api/documents/{name}/download`
+
+Each block in the index JSON shows its **identity** (`target_id`, `type`, table coords) and **size** (`char_count`, `run_count`, `ordinal`).
 
 ## Apply mutations (dev endpoint, temporary)
 
@@ -58,4 +66,5 @@ mvn test
 **Stage 3 complete** (through S3.4): bookmarks + structural index (Stage 1); run-preserving
 `modify` engine — `BlockTextIndex`, `RunEditor`, `ModifyApplier` (Stage 2); safety layer —
 `MutationValidator`, `NodeHashGuard`, `MutationApplier` orchestration, dev apply endpoint
-(Stage 3). Next: Stage 4 insert/delete.
+(Stage 3). Plus, pulled forward from Stage 7: document list/upload/download endpoints and a
+static test console UI at `/`. Next: Stage 4 insert/delete.

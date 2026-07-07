@@ -4,6 +4,10 @@ server:
 spring:
   config:
     import: optional:file:../.env[.properties],optional:file:.env[.properties]
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
 
 app:
   docs-dir: docs
