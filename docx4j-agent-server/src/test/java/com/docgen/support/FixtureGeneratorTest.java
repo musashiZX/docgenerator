@@ -6,7 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /** Generates committed fixtures under src/test/resources/fixtures/. */
-class FixtureGeneratorTest {
+public class FixtureGeneratorTest {
 
     @Test
     void generateSingleParagraphFixture() throws Exception {
@@ -24,7 +24,23 @@ class FixtureGeneratorTest {
         FixtureFactory.writeTable3x3(fixtures);
     }
 
-    static Path moduleRoot() {
+    @Test
+    void generateMultiRunParagraphFixture() throws Exception {
+        Path moduleDir = moduleRoot();
+        Path fixture = moduleDir.resolve("src/test/resources/fixtures/multi-run-paragraph.docx");
+        Files.createDirectories(fixture.getParent());
+        FixtureFactory.writeBoldThenNormal(fixture, "soy", ", wheat");
+    }
+
+    @Test
+    void generateGoldenModifyCellInput() throws Exception {
+        Path moduleDir = moduleRoot();
+        Path input = moduleDir.resolve("src/test/resources/golden/modify-cell/input.docx");
+        Files.createDirectories(input.getParent());
+        FixtureFactory.writeTable3x3(input);
+    }
+
+    public static Path moduleRoot() {
         Path cwd = Path.of("").toAbsolutePath().normalize();
         if (Files.exists(cwd.resolve("pom.xml"))) {
             return cwd;

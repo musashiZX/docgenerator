@@ -4,8 +4,10 @@ import org.docx4j.jaxb.Context;
 import org.docx4j.openpackaging.packages.WordprocessingMLPackage;
 import org.docx4j.openpackaging.parts.WordprocessingML.MainDocumentPart;
 import org.docx4j.wml.ObjectFactory;
+import org.docx4j.wml.BooleanDefaultTrue;
 import org.docx4j.wml.P;
 import org.docx4j.wml.R;
+import org.docx4j.wml.RPr;
 import org.docx4j.wml.Tbl;
 import org.docx4j.wml.TblGrid;
 import org.docx4j.wml.TblGridCol;
@@ -87,10 +89,33 @@ public final class FixtureFactory {
         table3x3().save(path.toFile());
     }
 
+    /** Paragraph with a bold first run and a plain second run. */
+    public static WordprocessingMLPackage boldThenNormal(String boldText, String normalText) throws Exception {
+        WordprocessingMLPackage pkg = WordprocessingMLPackage.createPackage();
+        MainDocumentPart main = pkg.getMainDocumentPart();
+        ObjectFactory factory = Context.getWmlObjectFactory();
+
+        P paragraph = factory.createP();
+        R boldRun = runWithText(factory, boldText);
+        RPr rPr = factory.createRPr();
+        BooleanDefaultTrue bold = factory.createBooleanDefaultTrue();
+        rPr.setB(bold);
+        boldRun.setRPr(rPr);
+        paragraph.getContent().add(boldRun);
+        paragraph.getContent().add(runWithText(factory, normalText));
+        main.addObject(paragraph);
+        return pkg;
+    }
+
+    public static void writeBoldThenNormal(Path path, String boldText, String normalText) throws Exception {
+        boldThenNormal(boldText, normalText).save(path.toFile());
+    }
+
     private static R runWithText(ObjectFactory factory, String text) {
         R run = factory.createR();
         Text value = factory.createText();
         value.setValue(text);
+        value.setSpace("preserve");
         run.getContent().add(value);
         return run;
     }

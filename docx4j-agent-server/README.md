@@ -18,6 +18,35 @@ Invoke-RestMethod http://localhost:8081/api/documents/your-file.docx/index | Con
 
 Each block in the JSON shows its **identity** (`target_id`, `type`, table coords) and **size** (`char_count`, `run_count`, `ordinal`).
 
+## Apply mutations (dev endpoint, temporary)
+
+`POST /api/dev/apply/{name}` with a mutation batch body. Direct apply, bypassing the
+future propose/approve workflow — will be removed in Stage 5.
+
+```bash
+curl -X POST http://localhost:8081/api/dev/apply/your-file.docx \
+  -H "Content-Type: application/json" \
+  -d '{
+        "schema_version": 1,
+        "explanation": "why",
+        "mutations": [{
+          "op": "modify",
+          "target_id": "dg_tbl0_r1_c1",
+          "old_text": "exact current text or substring",
+          "occurrence": 0,
+          "new_text": "replacement"
+        }]
+      }'
+```
+
+Responses:
+
+- `200` — `{ "status": "ok", "applied_count": n, "changed_ids": [...] }`; file saved.
+- `400` — validation failed (unknown `target_id`, duplicate target, empty/missing `old_text`,
+  `old_text` not present in the block). File untouched.
+- `409` — `old_text` matched the index but not the live document (stale). Batch rolled back.
+- `500` — hash-guard invariant violation (collateral change detected). Batch rolled back.
+
 ## Test
 
 ```bash
@@ -26,4 +55,7 @@ mvn test
 
 ## Status
 
-**Stage 1 complete** (S1.1–S1.6): bookmarks, structural index, `GET /api/documents/{name}/index`.
+**Stage 3 complete** (through S3.4): bookmarks + structural index (Stage 1); run-preserving
+`modify` engine — `BlockTextIndex`, `RunEditor`, `ModifyApplier` (Stage 2); safety layer —
+`MutationValidator`, `NodeHashGuard`, `MutationApplier` orchestration, dev apply endpoint
+(Stage 3). Next: Stage 4 insert/delete.

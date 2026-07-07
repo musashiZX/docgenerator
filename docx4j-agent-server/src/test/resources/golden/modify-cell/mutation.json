@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "explanation": "Golden scenario: update the center cell of a 3x3 table.",
+  "mutations": [
+    {
+      "op": "modify",
+      "target_id": "dg_tbl0_r1_c1",
+      "old_text": "R1C1",
+      "occurrence": 0,
+      "new_text": "R1C1 updated"
+    }
+  ]
+}
