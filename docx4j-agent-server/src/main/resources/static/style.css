@@ -135,6 +135,52 @@ body {
 .doc-list .empty { color: var(--muted); cursor: default; text-align: center; padding: 20px 0; }
 .doc-list .empty:hover { background: none; }
 
+/* ---------- view tabs ---------- */
+.view-tabs {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+  margin-right: 4px;
+}
+.view-tabs .tab {
+  border: none;
+  background: transparent;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--muted);
+}
+.view-tabs .tab + .tab { border-left: 1px solid var(--border); }
+.view-tabs .tab.active { background: var(--accent); color: #fff; font-weight: 600; }
+
+/* ---------- preview ---------- */
+.preview-wrap {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+  background: #fff;
+}
+.preview-wrap iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+}
+.preview-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  background: #fff;
+  z-index: 2;
+}
+
 /* ---------- blocks table ---------- */
 .table-wrap { overflow: auto; flex: 1; border: 1px solid var(--border); border-radius: 8px; }
 table.blocks { border-collapse: collapse; width: 100%; }

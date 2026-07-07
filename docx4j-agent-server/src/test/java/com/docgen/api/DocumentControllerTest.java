@@ -61,6 +61,18 @@ class DocumentControllerTest {
     }
 
     @Test
+    void previewReturnsHtmlWithBlockIds() throws Exception {
+        mockMvc.perform(get("/api/documents/single-paragraph.docx/preview"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type",
+                        org.hamcrest.Matchers.containsString("text/html")))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .content().string(org.hamcrest.Matchers.containsString("data-dg-id=\"dg_p0\"")))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .content().string(org.hamcrest.Matchers.containsString("Hello")));
+    }
+
+    @Test
     void downloadReturnsDocxBytes() throws Exception {
         mockMvc.perform(get("/api/documents/single-paragraph.docx/download"))
                 .andExpect(status().isOk())

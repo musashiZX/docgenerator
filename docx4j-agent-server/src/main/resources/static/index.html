@@ -38,6 +38,10 @@
       <div class="panel-head">
         <h2 id="doc-title">Select a document</h2>
         <div class="head-actions" id="doc-actions" hidden>
+          <div class="view-tabs" id="view-tabs">
+            <button class="tab active" data-view="blocks" id="tab-blocks">Blocks</button>
+            <button class="tab" data-view="preview" id="tab-preview">Preview</button>
+          </div>
           <button class="btn ghost sm" id="btn-refresh-index">&#8635; Re-index</button>
           <a class="btn ghost sm" id="btn-download" href="#" download>&#8681; Download</a>
         </div>
@@ -47,7 +51,13 @@
         <code>target_id</code>s) will appear here. Use <b>Edit</b> to stage a text change,
         <b>+&#8593;</b>/<b>+&#8595;</b> to insert a paragraph before/after, and <b>Del</b>
         to delete a paragraph (paragraphs only — table cells support Edit).
+        Switch to <b>Preview</b> to see the rendered document — hover any text to see its
+        <code>target_id</code>, click to jump to its row.
       </p>
+      <div class="preview-wrap" id="preview-wrap" hidden>
+        <div class="preview-loading" id="preview-loading">Rendering preview&#8230;</div>
+        <iframe id="preview-frame" title="Document preview"></iframe>
+      </div>
       <div class="table-wrap" id="table-wrap" hidden>
         <table class="blocks">
           <thead>

@@ -32,10 +32,15 @@ public class DocumentController {
 
     private final DocumentIndexService documentIndexService;
     private final DocumentLoader documentLoader;
+    private final com.docgen.document.DocumentPreviewService previewService;
 
-    public DocumentController(DocumentIndexService documentIndexService, DocumentLoader documentLoader) {
+    public DocumentController(
+            DocumentIndexService documentIndexService,
+            DocumentLoader documentLoader,
+            com.docgen.document.DocumentPreviewService previewService) {
         this.documentIndexService = documentIndexService;
         this.documentLoader = documentLoader;
+        this.previewService = previewService;
     }
 
     @GetMapping
@@ -64,6 +69,11 @@ public class DocumentController {
     @GetMapping("/{name}/index")
     public StructuralIndex index(@PathVariable("name") String name) throws Exception {
         return documentIndexService.buildIndex(name);
+    }
+
+    @GetMapping(value = "/{name}/preview", produces = "text/html;charset=UTF-8")
+    public String preview(@PathVariable("name") String name) throws Exception {
+        return previewService.renderHtml(name);
     }
 
     @GetMapping("/{name}/download")

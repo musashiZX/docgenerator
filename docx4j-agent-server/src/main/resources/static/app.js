@@ -9,6 +9,8 @@ const state = {
   // insert: { op:"insert", anchorId, position, text, style }
   // delete: { op:"delete", targetId }
   mutations: [],
+  view: "blocks", // "blocks" | "preview"
+  previewLoadedFor: null, // doc name the iframe currently shows
 };
 
 const $ = (id) => document.getElementById(id);
@@ -82,12 +84,14 @@ async function uploadFile(file) {
 async function openDoc(name) {
   state.currentDoc = name;
   state.mutations = [];
+  state.previewLoadedFor = null;
   renderBatch();
   await loadDocs(); // refresh active highlight
   $("doc-title").textContent = name;
   $("doc-actions").hidden = false;
   $("btn-download").href = `/api/documents/${encodeURIComponent(name)}/download`;
   await loadIndex();
+  if (state.view === "preview") await loadPreview();
 }
 
 async function loadIndex(flashIds) {
@@ -98,11 +102,89 @@ async function loadIndex(flashIds) {
     state.blocks = body.blocks;
     renderBlocks(flashIds || []);
     $("index-hint").hidden = true;
-    $("table-wrap").hidden = false;
+    setView(state.view);
   } catch (e) {
     log("err", `Could not load index: ${esc(e.message)}`);
   }
 }
+
+/* ============ preview ============ */
+function setView(view) {
+  state.view = view;
+  $("tab-blocks").classList.toggle("active", view === "blocks");
+  $("tab-preview").classList.toggle("active", view === "preview");
+  $("table-wrap").hidden = !(view === "blocks" && state.currentDoc);
+  $("preview-wrap").hidden = !(view === "preview" && state.currentDoc);
+  if (view === "preview" && state.currentDoc && state.previewLoadedFor !== state.currentDoc) {
+    loadPreview();
+  }
+}
+
+// Injected into the preview iframe: hover shows the block id, click reports
+// it back to the console so the matching row can be selected.
+const PREVIEW_AUGMENT = `
+<style>
+  [data-dg-id] { cursor: pointer; border-radius: 3px; transition: background 0.1s; }
+  [data-dg-id]:hover { background: #dbeafe !important; box-shadow: 0 0 0 2px #93c5fd; position: relative; }
+  [data-dg-id]:hover::before {
+    content: attr(data-dg-id);
+    position: absolute;
+    top: -22px;
+    left: 0;
+    background: #1e3a8a;
+    color: #fff;
+    font: 600 11px/1 "Segoe UI", sans-serif;
+    padding: 4px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    z-index: 99;
+    pointer-events: none;
+  }
+</style>
+<script>
+  document.addEventListener("click", function (e) {
+    var el = e.target.closest("[data-dg-id]");
+    if (el) parent.postMessage({ dgBlockId: el.getAttribute("data-dg-id") }, "*");
+  });
+<\/script>`;
+
+async function loadPreview() {
+  const doc = state.currentDoc;
+  $("preview-loading").style.display = "flex";
+  try {
+    const res = await fetch(`/api/documents/${encodeURIComponent(doc)}/preview`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || res.statusText);
+    }
+    let html = await res.text();
+    html = html.includes("</body>")
+      ? html.replace("</body>", `${PREVIEW_AUGMENT}</body>`)
+      : html + PREVIEW_AUGMENT;
+    $("preview-frame").srcdoc = html;
+    state.previewLoadedFor = doc;
+  } catch (e) {
+    log("err", `Could not render preview: ${esc(e.message)}`);
+  } finally {
+    $("preview-loading").style.display = "none";
+  }
+}
+
+// Click in the preview selects the matching row in the Blocks view.
+window.addEventListener("message", (e) => {
+  const id = e.data && e.data.dgBlockId;
+  if (!id) return;
+  setView("blocks");
+  const row = [...document.querySelectorAll("#blocks-body .tid")]
+    .find((el) => el.textContent === id);
+  if (row) {
+    const tr = row.closest("tr");
+    tr.scrollIntoView({ behavior: "smooth", block: "center" });
+    tr.classList.remove("flash-changed");
+    void tr.offsetWidth; // restart animation
+    tr.classList.add("flash-changed");
+  }
+});
 
 function renderBlocks(flashIds) {
   const tbody = $("blocks-body");
@@ -360,7 +442,9 @@ async function applyBatch() {
       state.mutations = [];
       $("explanation").value = "";
       renderBatch();
+      state.previewLoadedFor = null; // document changed — preview is stale
       await loadIndex(ids);
+      if (state.view === "preview") await loadPreview();
     } else if (body.details) {
       const items = body.details
         .map((d) => `<li>[#${d.mutation_index}] <b>${esc(d.code)}</b> — ${esc(d.message)}</li>`)
@@ -391,7 +475,13 @@ async function applyBatch() {
 
 /* ============ wiring ============ */
 $("btn-refresh-docs").onclick = loadDocs;
-$("btn-refresh-index").onclick = () => loadIndex();
+$("btn-refresh-index").onclick = () => {
+  state.previewLoadedFor = null;
+  loadIndex();
+  if (state.view === "preview") loadPreview();
+};
+$("tab-blocks").onclick = () => setView("blocks");
+$("tab-preview").onclick = () => setView("preview");
 $("btn-clear-batch").onclick = () => { state.mutations = []; renderBatch(); };
 $("btn-apply").onclick = applyBatch;
 $("btn-clear-log").onclick = () => { $("log").innerHTML = ""; };
