@@ -108,18 +108,39 @@ class ComplianceClientTest {
     }
 
     @Test
-    void emptyMutationsSurfacesModelExplanation() {
-        server.expect(requestTo("https://api.openai.com/v1/chat/completions"))
-                .andRespond(withSuccess(chatResponse("""
-                        {"schema_version":1,
-                         "explanation":"The request needs table row inserts, which are unsupported.",
-                         "mutations":[]}
-                        """), MediaType.APPLICATION_JSON));
+    void emptyMutationsSurfacesModelExplanationAfterRetry() {
+        for (int i = 0; i < 2; i++) {
+            server.expect(requestTo("https://api.openai.com/v1/chat/completions"))
+                    .andRespond(withSuccess(chatResponse("""
+                            {"schema_version":1,"explanation":"The request needs table row inserts, which are unsupported.",
+                             "mutations":[]}
+                            """), MediaType.APPLICATION_JSON));
+        }
 
         ComplianceClient.LlmDeclinedException ex = assertThrows(
                 ComplianceClient.LlmDeclinedException.class,
                 () -> client.propose("impossible", index, null));
         assertTrue(ex.getMessage().contains("unsupported"));
+        server.verify();
+    }
+
+    @Test
+    void emptyBatchTriggersRetryThenSucceeds() {
+        server.expect(requestTo("https://api.openai.com/v1/chat/completions"))
+                .andRespond(withSuccess(chatResponse("""
+                        {"schema_version":1,"explanation":"Cannot do it","mutations":[]}
+                        """), MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://api.openai.com/v1/chat/completions"))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("RECIPES")))
+                .andRespond(withSuccess(chatResponse("""
+                        {"schema_version":1,"explanation":"ok",
+                         "mutations":[{"op":"modify","target_id":"dg_p0",
+                           "old_text":"Alpha","occurrence":0,"new_text":"Alpha!"}]}
+                        """), MediaType.APPLICATION_JSON));
+
+        ComplianceClient.LlmProposal proposal = client.propose("fix alpha", index, null);
+        assertEquals("Alpha!", ((ModifyMutation) proposal.batch().mutations().get(0)).newText());
+        server.verify();
     }
 
     @Test

@@ -38,18 +38,21 @@ public class ProposalService {
     private final StructuralIndexBuilder indexBuilder;
     private final MutationApplier mutationApplier;
     private final ProposalStore store;
+    private final com.docgen.document.DocumentLibraryService libraryService;
 
     public ProposalService(
             DocumentLoader documentLoader,
             BookmarkIndexer bookmarkIndexer,
             StructuralIndexBuilder indexBuilder,
             MutationApplier mutationApplier,
-            ProposalStore store) {
+            ProposalStore store,
+            com.docgen.document.DocumentLibraryService libraryService) {
         this.documentLoader = documentLoader;
         this.bookmarkIndexer = bookmarkIndexer;
         this.indexBuilder = indexBuilder;
         this.mutationApplier = mutationApplier;
         this.store = store;
+        this.libraryService = libraryService;
     }
 
     /**
@@ -107,6 +110,7 @@ public class ProposalService {
         ApplyResult result = mutationApplier.apply(session, proposal.batch(), index);
 
         documentLoader.save(session.document(), path);
+        libraryService.touchAfterMutation(proposal.docName());
         store.update(proposal.withStatus(ProposalStatus.APPROVED, Instant.now()));
         log.info("Proposal {} approved; {} changed blocks in {}",
                 proposalId, result.changedIds().size(), proposal.docName());

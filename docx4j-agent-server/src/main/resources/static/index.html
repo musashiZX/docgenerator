@@ -87,7 +87,8 @@
         <h2>AI edit</h2>
       </div>
       <div class="ai-box">
-        <textarea id="ai-prompt" placeholder="Describe the edit in plain language, e.g. &quot;Add a comma at the end of every paragraph in section 1&quot; or &quot;Change the effective date to March 1, 2025&quot;."></textarea>
+        <textarea id="ai-prompt" placeholder="Describe the edit, e.g. &quot;Replace the Aim section with these three numbered lines: …&quot; or &quot;Change the effective date to March 1, 2025&quot;. Complex edits (delete + insert multiple lines) are supported."></textarea>
+        <p class="hint ai-selection-hint" id="ai-selection-hint" hidden></p>
         <div class="ai-actions">
           <input type="text" id="ai-model" placeholder="model (default gpt-4o-mini)">
           <button class="btn primary" id="btn-ai-propose" disabled>Propose with AI</button>

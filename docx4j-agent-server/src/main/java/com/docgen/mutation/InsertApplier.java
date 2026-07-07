@@ -34,7 +34,16 @@ public class InsertApplier {
 
     /** @return the target_id of the newly created paragraph */
     public String apply(WordprocessingMLPackage document, InsertMutation mutation) {
-        P anchor = bookmarkResolver.resolve(document, mutation.anchorId());
+        return apply(document, mutation, mutation.anchorId());
+    }
+
+    /**
+     * Like {@link #apply} but resolves {@code effectiveAnchorId} instead of
+     * {@code mutation.anchorId()}. Used when several consecutive "after"
+     * inserts on the same anchor must become separate paragraphs.
+     */
+    public String apply(WordprocessingMLPackage document, InsertMutation mutation, String effectiveAnchorId) {
+        P anchor = bookmarkResolver.resolve(document, effectiveAnchorId);
         List<Object> body = document.getMainDocumentPart().getJaxbElement().getBody().getContent();
         int anchorIndex = indexOfBodyParagraph(body, anchor);
         if (anchorIndex < 0) {

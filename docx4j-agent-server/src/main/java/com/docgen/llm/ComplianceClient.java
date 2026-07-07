@@ -51,6 +51,11 @@ public class ComplianceClient {
     }
 
     public LlmProposal propose(String request, StructuralIndex index, String modelOverride) {
+        return propose(request, index, modelOverride, null);
+    }
+
+    public LlmProposal propose(String request, StructuralIndex index,
+                               String modelOverride, String selectedText) {
         String apiKey = properties.openaiApiKey();
         if (apiKey == null || apiKey.isBlank()) {
             throw new IllegalStateException(
@@ -62,15 +67,23 @@ public class ComplianceClient {
 
         ArrayNode messages = mapper.createArrayNode();
         messages.add(message("system", CompliancePrompts.SYSTEM));
-        messages.add(message("user", CompliancePrompts.userMessage(request, index)));
+        messages.add(message("user", CompliancePrompts.userMessage(request, index, selectedText)));
 
         List<MutationValidator.ValidationError> lastErrors = null;
+        boolean retriedEmpty = false;
         for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             String content = chat(apiKey, model, messages);
             MutationBatch batch = parseBatch(content);
 
             if (batch.mutations() == null || batch.mutations().isEmpty()) {
-                // The model declined; surface its explanation instead of a generic error.
+                if (!retriedEmpty) {
+                    retriedEmpty = true;
+                    log.warn("LLM returned empty batch; nudging for section-replace retry");
+                    messages.add(message("assistant", content));
+                    messages.add(message("user",
+                            CompliancePrompts.emptyBatchRetryMessage(batch.explanation())));
+                    continue;
+                }
                 throw new LlmDeclinedException(
                         batch.explanation() == null || batch.explanation().isBlank()
                                 ? "The model returned no mutations for this request."

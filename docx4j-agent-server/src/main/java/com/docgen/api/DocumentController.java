@@ -1,7 +1,10 @@
 package com.docgen.api;
 
 import com.docgen.document.DocumentIndexService;
+import com.docgen.document.DocumentLibraryService;
 import com.docgen.document.DocumentLoader;
+import com.docgen.document.DocumentMetadata;
+import com.docgen.document.DocumentMetadataStore;
 import com.docgen.model.StructuralIndex;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -22,6 +25,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -32,14 +36,20 @@ public class DocumentController {
 
     private final DocumentIndexService documentIndexService;
     private final DocumentLoader documentLoader;
+    private final DocumentLibraryService libraryService;
+    private final DocumentMetadataStore metadataStore;
     private final com.docgen.document.DocumentPreviewService previewService;
 
     public DocumentController(
             DocumentIndexService documentIndexService,
             DocumentLoader documentLoader,
+            DocumentLibraryService libraryService,
+            DocumentMetadataStore metadataStore,
             com.docgen.document.DocumentPreviewService previewService) {
         this.documentIndexService = documentIndexService;
         this.documentLoader = documentLoader;
+        this.libraryService = libraryService;
+        this.metadataStore = metadataStore;
         this.previewService = previewService;
     }
 
@@ -53,11 +63,24 @@ public class DocumentController {
                             String.CASE_INSENSITIVE_ORDER))
                     .forEach(path -> {
                         try {
-                            documents.add(Map.of(
-                                    "name", path.getFileName().toString(),
-                                    "size", Files.size(path),
-                                    "modified_at", Instant.ofEpochMilli(
-                                            Files.getLastModifiedTime(path).toMillis()).toString()));
+                            String name = path.getFileName().toString();
+                            long size = Files.size(path);
+                            DocumentMetadata meta = metadataStore.read(name);
+                            Instant modified = meta != null
+                                    ? meta.updatedAt()
+                                    : Instant.ofEpochMilli(Files.getLastModifiedTime(path).toMillis());
+                            Instant uploaded = meta != null
+                                    ? meta.uploadedAt()
+                                    : modified;
+                            Map<String, Object> row = new HashMap<>();
+                            row.put("name", name);
+                            row.put("size", size);
+                            row.put("modified_at", modified.toString());
+                            row.put("uploaded_at", uploaded.toString());
+                            if (meta != null) {
+                                row.put("source", meta.source());
+                            }
+                            documents.add(row);
                         } catch (IOException ignored) {
                             // Skip files that vanish or are unreadable mid-listing.
                         }
@@ -76,6 +99,16 @@ public class DocumentController {
         return previewService.renderHtml(name);
     }
 
+    /** Raw .docx bytes (inline). Same payload as {@link #download} without attachment header. */
+    @GetMapping("/{name}")
+    public ResponseEntity<byte[]> getBytes(@PathVariable("name") String name) throws IOException {
+        Path path = documentLoader.resolveDoc(name);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+                .body(Files.readAllBytes(path));
+    }
+
     @GetMapping("/{name}/download")
     public ResponseEntity<byte[]> download(@PathVariable("name") String name) throws IOException {
         Path path = documentLoader.resolveDoc(name);
@@ -90,19 +123,16 @@ public class DocumentController {
     }
 
     @PostMapping("/upload")
-    public Map<String, Object> upload(@RequestParam("file") MultipartFile file) throws IOException {
+    public Map<String, Object> upload(@RequestParam("file") MultipartFile file) throws Exception {
         if (file.isEmpty()) {
             throw new IllegalArgumentException("Empty file.");
         }
-        String name = DocumentLoader.sanitizeFilename(file.getOriginalFilename());
-        if (!name.toLowerCase().endsWith(".docx")) {
-            throw new IllegalArgumentException("Only .docx files are supported.");
-        }
-        byte[] content = file.getBytes();
-        documentLoader.validate(content);
-
-        Path target = documentLoader.docsDirectory().resolve(name);
-        Files.write(target, content);
-        return Map.of("status", "ok", "name", name, "size", content.length);
+        DocumentLibraryService.StoredDocument stored = libraryService.storeUpload(
+                file.getOriginalFilename(), file.getBytes());
+        return Map.of(
+                "status", "ok",
+                "name", stored.name(),
+                "size", stored.size(),
+                "uploaded_at", stored.uploadedAt().toString());
     }
 }

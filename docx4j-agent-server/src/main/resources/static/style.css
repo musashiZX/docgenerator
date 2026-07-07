@@ -337,6 +337,8 @@ table.blocks tr.flash-changed { animation: flash 1.6s ease-out; }
   font-family: var(--mono);
 }
 .ai-actions input:focus { outline: none; border-color: var(--accent); }
+.ai-selection-hint { margin: 6px 0 0; font-size: 12px; }
+.ai-selection-hint .btn { margin-left: 6px; padding: 1px 6px; font-size: 11px; }
 
 /* ---------- proposals ---------- */
 .proposal-card {

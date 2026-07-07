@@ -2,6 +2,8 @@ package com.docgen.proposal;
 
 import com.docgen.config.AppProperties;
 import com.docgen.document.DocumentLoader;
+import com.docgen.document.DocumentLibraryService;
+import com.docgen.document.DocumentMetadataStore;
 import com.docgen.index.BookmarkIndexer;
 import com.docgen.index.BookmarkResolver;
 import com.docgen.index.StructuralIndexBuilder;
@@ -56,7 +58,9 @@ class ProposalServiceTest {
                 new NodeHashGuard(indexBuilder));
         service = new ProposalService(
                 loader, new BookmarkIndexer(), indexBuilder, applier,
-                new ProposalStore(loader, new ObjectMapper()));
+                new ProposalStore(loader, new ObjectMapper()),
+                new DocumentLibraryService(loader, new BookmarkIndexer(),
+                        new DocumentMetadataStore(loader, new ObjectMapper())));
 
         docPath = loader.docsDirectory().resolve("work.docx");
         FixtureFactory.writeParagraphs(docPath, "Alpha", "Bravo", "Charlie");

@@ -144,6 +144,16 @@ class MutationValidatorTest {
         assertTrue(validator.validate(batch, index).isEmpty());
     }
 
+    @Test
+    void consecutiveAfterInsertsOnSameAnchorAllowed() {
+        MutationBatch batch = batch(
+                new InsertMutation("insert", "dg_p0", "after", "paragraph", "Line 1", null),
+                new InsertMutation("insert", "dg_p0", "after", "paragraph", "Line 2", null),
+                new InsertMutation("insert", "dg_p0", "after", "paragraph", "Line 3", null));
+
+        assertTrue(validator.validate(batch, index).isEmpty());
+    }
+
     private static ModifyMutation modify(String targetId, String oldText, String newText) {
         return new ModifyMutation("modify", targetId, oldText, 0, newText);
     }

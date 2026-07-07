@@ -37,7 +37,8 @@ public class ProposalController {
             @JsonProperty("doc_name") String docName,
             MutationBatch batch,
             String message,
-            String model
+            String model,
+            @JsonProperty("selected_text") String selectedText
     ) {
     }
 
@@ -78,8 +79,8 @@ public class ProposalController {
         log.info("[trace:{}] LLM proposal for {}: \"{}\"",
                 traceId, request.docName(), request.message());
         StructuralIndex index = documentIndexService.buildIndex(request.docName());
-        ComplianceClient.LlmProposal llm =
-                complianceClient.propose(request.message(), index, request.model());
+        ComplianceClient.LlmProposal llm = complianceClient.propose(
+                request.message(), index, request.model(), request.selectedText());
         return proposalService.propose(
                 request.docName(), llm.batch(), "llm", request.message(), llm.model());
     }

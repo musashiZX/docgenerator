@@ -51,7 +51,7 @@ public class MutationValidator {
             switch (mutation) {
                 case ModifyMutation modify -> validateModify(i, modify, blocks, seenTargets, errors);
                 case InsertMutation insert ->
-                        validateInsert(i, insert, blocks, seenAnchors, deletedTargets, errors);
+                        validateInsert(i, insert, batch.mutations(), blocks, seenAnchors, deletedTargets, errors);
                 case DeleteMutation delete ->
                         validateDelete(i, delete, blocks, seenTargets, deletedTargets, errors);
             }
@@ -111,6 +111,7 @@ public class MutationValidator {
     private static void validateInsert(
             int i,
             InsertMutation insert,
+            List<Mutation> mutations,
             Map<String, BlockDescriptor> blocks,
             Set<String> seenAnchors,
             Set<String> deletedTargets,
@@ -151,10 +152,22 @@ public class MutationValidator {
             errors.add(new ValidationError(i, "MISSING_TEXT", "text is required for insert"));
             return;
         }
-        if (!seenAnchors.add(anchorId + "#" + insert.position())) {
+        // Consecutive "after" inserts on the same anchor chain into multiple
+        // paragraphs (line 1, line 2, …). Only the first needs a unique slot.
+        String anchorKey = anchorId + "#" + insert.position();
+        if ("after".equals(insert.position()) && i > 0) {
+            Mutation prev = mutations.get(i - 1);
+            if (prev instanceof InsertMutation prevInsert
+                    && anchorId.equals(prevInsert.anchorId())
+                    && "after".equals(prevInsert.position())) {
+                return;
+            }
+        }
+        if (!seenAnchors.add(anchorKey)) {
             errors.add(new ValidationError(i, "DUPLICATE_ANCHOR",
                     "At most one insert per anchor+position per batch: "
-                            + anchorId + " " + insert.position()));
+                            + anchorId + " " + insert.position()
+                            + " (use consecutive \"after\" inserts to add multiple lines)"));
         }
     }
 

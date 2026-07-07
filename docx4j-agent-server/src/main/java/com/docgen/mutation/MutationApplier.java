@@ -10,8 +10,10 @@ import com.docgen.model.MutationBatch;
 import com.docgen.model.StructuralIndex;
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -54,6 +56,7 @@ public class MutationApplier {
 
         Set<String> targetedIds = new HashSet<>();
         Set<String> createdIds = new HashSet<>();
+        Map<String, String> insertChainTail = new HashMap<>();
         try {
             for (Mutation mutation : batch.mutations()) {
                 switch (mutation) {
@@ -62,7 +65,15 @@ public class MutationApplier {
                         targetedIds.add(modify.targetId());
                     }
                     case InsertMutation insert -> {
-                        String newId = insertApplier.apply(session.document(), insert);
+                        String chainKey = insert.anchorId() + "#after";
+                        String effectiveAnchor = "after".equals(insert.position())
+                                && insertChainTail.containsKey(chainKey)
+                                ? insertChainTail.get(chainKey)
+                                : insert.anchorId();
+                        String newId = insertApplier.apply(session.document(), insert, effectiveAnchor);
+                        if ("after".equals(insert.position())) {
+                            insertChainTail.put(chainKey, newId);
+                        }
                         targetedIds.add(newId);
                         createdIds.add(newId);
                     }

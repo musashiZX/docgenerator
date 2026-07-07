@@ -12,6 +12,7 @@ const state = {
   view: "blocks", // "blocks" | "preview"
   previewLoadedFor: null, // doc name the iframe currently shows
   proposals: [], // pending proposals for the current doc
+  selectedBlockId: null, // block targeted from preview for AI context
 };
 
 const $ = (id) => document.getElementById(id);
@@ -86,6 +87,8 @@ async function openDoc(name) {
   state.currentDoc = name;
   state.mutations = [];
   state.previewLoadedFor = null;
+  state.selectedBlockId = null;
+  updateAiSelectionHint();
   renderBatch();
   await loadDocs(); // refresh active highlight
   $("doc-title").textContent = name;
@@ -104,6 +107,7 @@ async function loadIndex(flashIds) {
     if (!res.ok) throw new Error(body.error || res.statusText);
     state.blocks = body.blocks;
     renderBlocks(flashIds || []);
+    updateAiSelectionHint();
     $("index-hint").hidden = true;
     setView(state.view);
   } catch (e) {
@@ -197,6 +201,8 @@ window.addEventListener("message", (e) => {
 });
 
 function showPreviewMenu(block, x, y) {
+  state.selectedBlockId = block.target_id;
+  updateAiSelectionHint();
   const menu = $("preview-menu");
   $("preview-menu-id").textContent = block.target_id;
 
@@ -229,6 +235,33 @@ function showPreviewMenu(block, x, y) {
 
 function hidePreviewMenu() {
   $("preview-menu").hidden = true;
+}
+
+function selectedTextForAi() {
+  if (!state.selectedBlockId) return null;
+  const block = state.blocks.find((b) => b.target_id === state.selectedBlockId);
+  return block && block.text ? block.text : null;
+}
+
+function updateAiSelectionHint() {
+  const el = $("ai-selection-hint");
+  if (!el) return;
+  if (!state.selectedBlockId) {
+    el.hidden = true;
+    return;
+  }
+  const block = state.blocks.find((b) => b.target_id === state.selectedBlockId);
+  el.hidden = false;
+  el.innerHTML = `Focus block: <code class="tid">${esc(state.selectedBlockId)}</code>` +
+    (block && block.text
+      ? ` — <span class="muted">${esc(block.text.slice(0, 80))}${block.text.length > 80 ? "…" : ""}</span>`
+      : "") +
+    ` <button class="btn ghost sm" id="btn-clear-selection">Clear</button>`;
+  const btn = $("btn-clear-selection");
+  if (btn) btn.onclick = () => {
+    state.selectedBlockId = null;
+    updateAiSelectionHint();
+  };
 }
 
 function renderBlocks(flashIds) {
@@ -563,18 +596,21 @@ async function proposeWithAi() {
     log("err", "Describe the edit first.");
     return;
   }
+  const selectedText = selectedTextForAi();
   const btn = $("btn-ai-propose");
   btn.disabled = true;
   btn.textContent = "Thinking…";
   try {
+    const payload = {
+      doc_name: state.currentDoc,
+      message: prompt,
+      model: $("ai-model").value.trim() || undefined,
+    };
+    if (selectedText) payload.selected_text = selectedText;
     const res = await fetch("/api/proposals", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        doc_name: state.currentDoc,
-        message: prompt,
-        model: $("ai-model").value.trim() || undefined,
-      }),
+      body: JSON.stringify(payload),
     });
     const body = await res.json();
     if (!res.ok) {

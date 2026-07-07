@@ -38,16 +38,19 @@ public class DevApplyController {
     private final BookmarkIndexer bookmarkIndexer;
     private final StructuralIndexBuilder indexBuilder;
     private final MutationApplier mutationApplier;
+    private final com.docgen.document.DocumentLibraryService libraryService;
 
     public DevApplyController(
             DocumentLoader documentLoader,
             BookmarkIndexer bookmarkIndexer,
             StructuralIndexBuilder indexBuilder,
-            MutationApplier mutationApplier) {
+            MutationApplier mutationApplier,
+            com.docgen.document.DocumentLibraryService libraryService) {
         this.documentLoader = documentLoader;
         this.bookmarkIndexer = bookmarkIndexer;
         this.indexBuilder = indexBuilder;
         this.mutationApplier = mutationApplier;
+        this.libraryService = libraryService;
     }
 
     @PostMapping("/apply/{name}")
@@ -70,6 +73,7 @@ public class DevApplyController {
         ApplyResult result = mutationApplier.apply(session, batch, index);
 
         documentLoader.save(session.document(), path);
+        libraryService.touchAfterMutation(name);
         log.info("[trace:{}] DEV apply success doc={} changed_ids={}",
                 traceId, name, result.changedIds());
         return Map.of(

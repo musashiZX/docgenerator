@@ -149,6 +149,31 @@ class MutationApplierTest {
         assertEquals("Alpha", texts.get("dg_p0"), "modify must be rolled back");
     }
 
+    @Test
+    void chainedAfterInsertsCreateMultipleParagraphs() throws Exception {
+        WordprocessingMLPackage document = FixtureFactory.paragraphs("Anchor", "Remove1", "Remove2", "Keep");
+        new BookmarkIndexer().ensureBookmarks(document);
+        DocumentSession session = new DocumentSession(document);
+        StructuralIndex paragraphIndex = indexBuilder.build(document, "chain.docx");
+
+        MutationBatch batch = batch(
+                new DeleteMutation("delete", "dg_p1"),
+                new DeleteMutation("delete", "dg_p2"),
+                new InsertMutation("insert", "dg_p0", "after", "paragraph", "New A", null),
+                new InsertMutation("insert", "dg_p0", "after", "paragraph", "New B", null),
+                new InsertMutation("insert", "dg_p0", "after", "paragraph", "New C", null));
+
+        ApplyResult result = applier.apply(session, batch, paragraphIndex);
+
+        assertEquals(5, result.appliedCount());
+        assertEquals(3, result.createdIds().size());
+
+        List<String> texts = indexBuilder.build(session.document(), "chain.docx").blocks().stream()
+                .map(BlockDescriptor::text)
+                .toList();
+        assertEquals(List.of("Anchor", "New A", "New B", "New C", "Keep"), texts);
+    }
+
     private static MutationBatch batch(Mutation... mutations) {
         return new MutationBatch(1, "test", List.of(mutations));
     }
