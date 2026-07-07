@@ -180,6 +180,19 @@ body {
   background: #fff;
   z-index: 2;
 }
+.preview-menu {
+  position: absolute;
+  z-index: 3;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.18);
+  padding: 8px;
+  min-width: 160px;
+}
+.preview-menu-head { margin-bottom: 6px; }
+.preview-menu-actions { display: flex; gap: 4px; }
+.preview-menu-actions .btn { padding: 3px 8px; font-size: 12px; white-space: nowrap; }
 
 /* ---------- blocks table ---------- */
 .table-wrap { overflow: auto; flex: 1; border: 1px solid var(--border); border-radius: 8px; }

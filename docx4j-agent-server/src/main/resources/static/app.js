@@ -111,6 +111,7 @@ async function loadIndex(flashIds) {
 /* ============ preview ============ */
 function setView(view) {
   state.view = view;
+  hidePreviewMenu();
   $("tab-blocks").classList.toggle("active", view === "blocks");
   $("tab-preview").classList.toggle("active", view === "preview");
   $("table-wrap").hidden = !(view === "blocks" && state.currentDoc);
@@ -144,12 +145,17 @@ const PREVIEW_AUGMENT = `
 <script>
   document.addEventListener("click", function (e) {
     var el = e.target.closest("[data-dg-id]");
-    if (el) parent.postMessage({ dgBlockId: el.getAttribute("data-dg-id") }, "*");
+    parent.postMessage({
+      dgBlockId: el ? el.getAttribute("data-dg-id") : null,
+      x: e.clientX,
+      y: e.clientY,
+    }, "*");
   });
 <\/script>`;
 
 async function loadPreview() {
   const doc = state.currentDoc;
+  hidePreviewMenu();
   $("preview-loading").style.display = "flex";
   try {
     const res = await fetch(`/api/documents/${encodeURIComponent(doc)}/preview`);
@@ -170,21 +176,57 @@ async function loadPreview() {
   }
 }
 
-// Click in the preview selects the matching row in the Blocks view.
+// Click in the preview opens a floating action menu on that block
+// (stays in the preview — mutations are staged in the composer on the right).
 window.addEventListener("message", (e) => {
-  const id = e.data && e.data.dgBlockId;
-  if (!id) return;
-  setView("blocks");
-  const row = [...document.querySelectorAll("#blocks-body .tid")]
-    .find((el) => el.textContent === id);
-  if (row) {
-    const tr = row.closest("tr");
-    tr.scrollIntoView({ behavior: "smooth", block: "center" });
-    tr.classList.remove("flash-changed");
-    void tr.offsetWidth; // restart animation
-    tr.classList.add("flash-changed");
+  if (!e.data || !("dgBlockId" in e.data)) return;
+  const { dgBlockId: id, x, y } = e.data;
+  if (!id) {
+    hidePreviewMenu();
+    return;
   }
+  const block = state.blocks.find((b) => b.target_id === id);
+  if (!block) {
+    log("err", `<code>${esc(id)}</code> not found in the index — try Re-index.`);
+    return;
+  }
+  showPreviewMenu(block, x, y);
 });
+
+function showPreviewMenu(block, x, y) {
+  const menu = $("preview-menu");
+  $("preview-menu-id").textContent = block.target_id;
+
+  const actions = $("preview-menu-actions");
+  actions.innerHTML = "";
+  const addBtn = (label, title, cls, fn) => {
+    const btn = document.createElement("button");
+    btn.className = `btn ghost sm ${cls || ""}`;
+    btn.innerHTML = label;
+    btn.title = title;
+    btn.onclick = () => { fn(); hidePreviewMenu(); };
+    actions.appendChild(btn);
+  };
+  addBtn("Edit", "Stage modify", "", () => stageModify(block));
+  if (block.type === "paragraph") {
+    addBtn("+&#8593;", "Insert paragraph before", "", () => stageInsert(block, "before"));
+    addBtn("+&#8595;", "Insert paragraph after", "", () => stageInsert(block, "after"));
+    addBtn("Del", "Stage delete", "danger-text", () => stageDelete(block));
+  }
+
+  // Position within the preview area; iframe click coords map 1:1 because the
+  // iframe fills the wrapper. Keep the menu inside the visible box.
+  const wrap = $("preview-wrap");
+  menu.hidden = false;
+  const left = Math.min(x, wrap.clientWidth - menu.offsetWidth - 8);
+  const top = Math.min(y + 10, wrap.clientHeight - menu.offsetHeight - 8);
+  menu.style.left = `${Math.max(8, left)}px`;
+  menu.style.top = `${Math.max(8, top)}px`;
+}
+
+function hidePreviewMenu() {
+  $("preview-menu").hidden = true;
+}
 
 function renderBlocks(flashIds) {
   const tbody = $("blocks-body");
@@ -482,6 +524,10 @@ $("btn-refresh-index").onclick = () => {
 };
 $("tab-blocks").onclick = () => setView("blocks");
 $("tab-preview").onclick = () => setView("preview");
+// Clicking anywhere in the console outside the floating menu closes it.
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#preview-menu")) hidePreviewMenu();
+});
 $("btn-clear-batch").onclick = () => { state.mutations = []; renderBatch(); };
 $("btn-apply").onclick = applyBatch;
 $("btn-clear-log").onclick = () => { $("log").innerHTML = ""; };
