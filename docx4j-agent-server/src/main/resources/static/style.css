@@ -315,6 +315,75 @@ table.blocks tr.flash-changed { animation: flash 1.6s ease-out; }
   word-break: break-word;
 }
 
+/* ---------- AI edit box ---------- */
+.ai-box textarea {
+  width: 100%;
+  min-height: 64px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+}
+.ai-box textarea:focus { outline: none; border-color: var(--accent); }
+.ai-actions { display: flex; gap: 8px; margin-top: 8px; }
+.ai-actions input {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  font-family: var(--mono);
+}
+.ai-actions input:focus { outline: none; border-color: var(--accent); }
+
+/* ---------- proposals ---------- */
+.proposal-card {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--amber);
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: #fffdf7;
+}
+.proposal-card .card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.proposal-prompt { color: var(--muted); font-style: italic; margin-bottom: 4px; }
+.proposal-explanation { margin-bottom: 6px; }
+.proposal-diffs { max-height: 260px; overflow-y: auto; }
+.diff-block {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  background: #fff;
+}
+.diff-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.diff-line {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  margin-top: 2px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  display: flex;
+  gap: 6px;
+}
+.diff-line span:first-child { flex: 0 0 auto; font-weight: 700; }
+.diff-line.before { background: var(--red-soft); color: #7f1d1d; }
+.diff-line.after { background: var(--green-soft); color: #14532d; }
+
 /* ---------- log ---------- */
 .log-head { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; }
 .log {

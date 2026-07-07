@@ -11,6 +11,7 @@ const state = {
   mutations: [],
   view: "blocks", // "blocks" | "preview"
   previewLoadedFor: null, // doc name the iframe currently shows
+  proposals: [], // pending proposals for the current doc
 };
 
 const $ = (id) => document.getElementById(id);
@@ -90,7 +91,9 @@ async function openDoc(name) {
   $("doc-title").textContent = name;
   $("doc-actions").hidden = false;
   $("btn-download").href = `/api/documents/${encodeURIComponent(name)}/download`;
+  $("btn-ai-propose").disabled = false;
   await loadIndex();
+  await loadProposals();
   if (state.view === "preview") await loadPreview();
 }
 
@@ -336,6 +339,7 @@ function renderBatch() {
   wrap.innerHTML = "";
   $("composer-hint").hidden = state.mutations.length > 0;
   $("btn-apply").disabled = state.mutations.length === 0;
+  $("btn-propose").disabled = state.mutations.length === 0;
 
   state.mutations.forEach((m, i) => {
     const card = document.createElement("div");
@@ -458,6 +462,168 @@ function refreshJsonPreview() {
   }
 }
 
+/* ============ proposals ============ */
+async function loadProposals() {
+  if (!state.currentDoc) return;
+  try {
+    const res = await fetch(`/api/proposals?doc=${encodeURIComponent(state.currentDoc)}`);
+    const all = await res.json();
+    state.proposals = all.filter((p) => p.status === "PENDING");
+    renderProposals();
+  } catch (e) {
+    log("err", `Could not load proposals: ${esc(e.message)}`);
+  }
+}
+
+function renderProposals() {
+  const wrap = $("proposal-cards");
+  wrap.innerHTML = "";
+  $("proposals-hint").hidden = state.proposals.length > 0;
+
+  for (const proposal of state.proposals) {
+    const card = document.createElement("div");
+    card.className = "proposal-card";
+
+    const sourceBadge = proposal.source === "llm"
+      ? `<span class="op-badge insert">AI</span>`
+      : `<span class="op-badge modify">manual</span>`;
+    const promptLine = proposal.prompt
+      ? `<div class="proposal-prompt">&ldquo;${esc(proposal.prompt)}&rdquo;</div>`
+      : "";
+    const explanation = proposal.batch && proposal.batch.explanation
+      ? `<div class="proposal-explanation">${esc(proposal.batch.explanation)}</div>`
+      : "";
+
+    const diffs = (proposal.diffs || []).map((d) => {
+      const before = d.before_text != null
+        ? `<div class="diff-line before"><span>&minus;</span>${esc(d.before_text) || "<i>(empty)</i>"}</div>`
+        : "";
+      const after = d.after_text != null
+        ? `<div class="diff-line after"><span>+</span>${esc(d.after_text) || "<i>(empty)</i>"}</div>`
+        : "";
+      return `<div class="diff-block">` +
+        `<div class="diff-head"><span class="tid">${esc(d.target_id)}</span>` +
+        `<span class="op-badge ${esc(d.op)}">${esc(d.op)}</span></div>` +
+        before + after + `</div>`;
+    }).join("");
+
+    card.innerHTML =
+      `<div class="card-head"><span>${sourceBadge} ` +
+      `<span class="muted">${new Date(proposal.created_at).toLocaleTimeString()}</span>` +
+      (proposal.model ? ` <span class="muted">${esc(proposal.model)}</span>` : "") +
+      `</span><span class="tid">${esc(proposal.id.slice(0, 8))}</span></div>` +
+      promptLine + explanation +
+      `<div class="proposal-diffs">${diffs}</div>` +
+      `<div class="composer-actions">` +
+      `<button class="btn primary" data-approve="${esc(proposal.id)}">Approve &amp; save</button>` +
+      `<button class="btn ghost danger-text" data-reject="${esc(proposal.id)}">Reject</button>` +
+      `</div>`;
+    wrap.appendChild(card);
+  }
+
+  wrap.querySelectorAll("[data-approve]").forEach((btn) => {
+    btn.onclick = () => decideProposal(btn.dataset.approve, "approve");
+  });
+  wrap.querySelectorAll("[data-reject]").forEach((btn) => {
+    btn.onclick = () => decideProposal(btn.dataset.reject, "reject");
+  });
+}
+
+async function decideProposal(id, action) {
+  try {
+    const res = await fetch(`/api/proposals/${encodeURIComponent(id)}/${action}`, { method: "POST" });
+    const body = await res.json();
+    if (!res.ok) {
+      const detail = body.details
+        ? body.details.map((d) => `[#${d.mutation_index}] ${d.code} — ${d.message}`).join("; ")
+        : (body.error || body.message || res.statusText);
+      throw new Error(detail);
+    }
+    if (action === "approve") {
+      const ids = body.changed_ids || [];
+      log("ok",
+        `Proposal approved — ${body.applied_count} mutation(s) saved. Changed: ` +
+        ids.map((x) => `<code>${esc(x)}</code>`).join(", "));
+      state.previewLoadedFor = null;
+      await loadIndex(ids);
+      if (state.view === "preview") await loadPreview();
+    } else {
+      log("ok", "Proposal rejected — document unchanged.");
+    }
+    await loadProposals();
+  } catch (e) {
+    log("err", `Could not ${action} proposal: ${esc(e.message)}`);
+    await loadProposals();
+  }
+}
+
+async function proposeWithAi() {
+  const prompt = $("ai-prompt").value.trim();
+  if (!prompt) {
+    log("err", "Describe the edit first.");
+    return;
+  }
+  const btn = $("btn-ai-propose");
+  btn.disabled = true;
+  btn.textContent = "Thinking…";
+  try {
+    const res = await fetch("/api/proposals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        doc_name: state.currentDoc,
+        message: prompt,
+        model: $("ai-model").value.trim() || undefined,
+      }),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      const detail = body.details
+        ? body.details.map((d) => `[#${d.mutation_index}] ${d.code} — ${d.message}`).join("; ")
+        : (body.message || body.error || res.statusText);
+      throw new Error(detail);
+    }
+    log("ok",
+      `AI proposed ${body.batch.mutations.length} mutation(s) — review below.` +
+      (body.batch.explanation ? `<br><i>${esc(body.batch.explanation)}</i>` : ""));
+    $("ai-prompt").value = "";
+    await loadProposals();
+  } catch (e) {
+    log("err", `AI proposal failed: ${esc(e.message)}`);
+  } finally {
+    btn.disabled = !state.currentDoc;
+    btn.textContent = "Propose with AI";
+  }
+}
+
+async function proposeManualBatch() {
+  const batch = buildBatch();
+  $("btn-propose").disabled = true;
+  try {
+    const res = await fetch("/api/proposals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ doc_name: state.currentDoc, batch }),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      const detail = body.details
+        ? body.details.map((d) => `[#${d.mutation_index}] ${d.code} — ${d.message}`).join("; ")
+        : (body.message || body.error || res.statusText);
+      throw new Error(detail);
+    }
+    log("ok", `Proposal created from ${batch.mutations.length} staged mutation(s) — review above.`);
+    state.mutations = [];
+    $("explanation").value = "";
+    renderBatch();
+    await loadProposals();
+  } catch (e) {
+    log("err", `Proposal failed: ${esc(e.message)}`);
+  } finally {
+    $("btn-propose").disabled = state.mutations.length === 0;
+  }
+}
+
 /* ============ apply ============ */
 async function applyBatch() {
   const batch = buildBatch();
@@ -530,6 +696,9 @@ document.addEventListener("click", (e) => {
 });
 $("btn-clear-batch").onclick = () => { state.mutations = []; renderBatch(); };
 $("btn-apply").onclick = applyBatch;
+$("btn-propose").onclick = proposeManualBatch;
+$("btn-ai-propose").onclick = proposeWithAi;
+$("btn-refresh-proposals").onclick = loadProposals;
 $("btn-clear-log").onclick = () => { $("log").innerHTML = ""; };
 $("btn-stage-all-comma").onclick = stageCommaForAllBlocks;
 $("btn-toggle-json").onclick = () => {

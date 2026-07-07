@@ -43,6 +43,53 @@ public class ApiExceptionHandler {
                 "trace_id", traceId));
     }
 
+    @ExceptionHandler(com.docgen.proposal.ProposalService.ProposalNotFoundException.class)
+    public ResponseEntity<Map<String, String>> proposalNotFound(
+            com.docgen.proposal.ProposalService.ProposalNotFoundException ex,
+            HttpServletRequest request) {
+        String traceId = String.valueOf(request.getAttribute(TraceIdFilter.TRACE_ID_ATTR));
+        log.warn("[trace:{}] {}", traceId, ex.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(
+                "error", ex.getMessage(),
+                "trace_id", traceId));
+    }
+
+    @ExceptionHandler(com.docgen.llm.ComplianceClient.LlmDeclinedException.class)
+    public ResponseEntity<Map<String, String>> llmDeclined(
+            com.docgen.llm.ComplianceClient.LlmDeclinedException ex,
+            HttpServletRequest request) {
+        String traceId = String.valueOf(request.getAttribute(TraceIdFilter.TRACE_ID_ATTR));
+        log.warn("[trace:{}] LLM declined: {}", traceId, ex.getMessage());
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(Map.of(
+                "error", "llm_declined",
+                "message", ex.getMessage(),
+                "trace_id", traceId));
+    }
+
+    @ExceptionHandler(org.springframework.web.client.RestClientResponseException.class)
+    public ResponseEntity<Map<String, String>> upstreamLlmError(
+            org.springframework.web.client.RestClientResponseException ex,
+            HttpServletRequest request) {
+        String traceId = String.valueOf(request.getAttribute(TraceIdFilter.TRACE_ID_ATTR));
+        log.error("[trace:{}] OpenAI call failed: {} {}",
+                traceId, ex.getStatusCode(), ex.getResponseBodyAsString());
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of(
+                "error", "llm_upstream_error",
+                "message", "OpenAI API call failed with " + ex.getStatusCode(),
+                "trace_id", traceId));
+    }
+
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, String>> illegalState(
+            IllegalStateException ex,
+            HttpServletRequest request) {
+        String traceId = String.valueOf(request.getAttribute(TraceIdFilter.TRACE_ID_ATTR));
+        log.error("[trace:{}] {}", traceId, ex.getMessage());
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                "error", ex.getMessage(),
+                "trace_id", traceId));
+    }
+
     @ExceptionHandler(MutationValidator.MutationValidationException.class)
     public ResponseEntity<Map<String, Object>> validationFailed(
             MutationValidator.MutationValidationException ex,

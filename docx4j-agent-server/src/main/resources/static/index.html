@@ -84,6 +84,24 @@
     <!-- ============ Mutation composer ============ -->
     <aside class="panel composer">
       <div class="panel-head">
+        <h2>AI edit</h2>
+      </div>
+      <div class="ai-box">
+        <textarea id="ai-prompt" placeholder="Describe the edit in plain language, e.g. &quot;Add a comma at the end of every paragraph in section 1&quot; or &quot;Change the effective date to March 1, 2025&quot;."></textarea>
+        <div class="ai-actions">
+          <input type="text" id="ai-model" placeholder="model (default gpt-4o-mini)">
+          <button class="btn primary" id="btn-ai-propose" disabled>Propose with AI</button>
+        </div>
+      </div>
+
+      <div class="panel-head log-head">
+        <h2>Proposals</h2>
+        <button class="btn ghost sm" id="btn-refresh-proposals" title="Refresh proposals">&#8635;</button>
+      </div>
+      <p class="hint" id="proposals-hint">AI or manual batches land here for review before anything is saved.</p>
+      <div id="proposal-cards"></div>
+
+      <div class="panel-head log-head">
         <h2>Mutation batch</h2>
         <button class="btn ghost sm" id="btn-clear-batch" title="Clear batch">Clear</button>
       </div>
@@ -99,7 +117,8 @@
       </div>
 
       <div class="composer-actions">
-        <button class="btn primary" id="btn-apply" disabled>Apply batch</button>
+        <button class="btn primary" id="btn-propose" disabled title="Create a reviewable proposal (recommended)">Propose batch</button>
+        <button class="btn ghost" id="btn-apply" disabled title="Apply immediately, skipping review (dev only)">Apply directly</button>
         <button class="btn ghost" id="btn-toggle-json">View JSON</button>
       </div>
       <pre class="json-preview" id="json-preview" hidden></pre>

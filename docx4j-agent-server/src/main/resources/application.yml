@@ -11,6 +11,11 @@ spring:
 
 app:
   docs-dir: docs
+  # Loaded from repo-root .env via spring.config.import (OPENAI_API_KEY=...)
+  openai-api-key: ${OPENAI_API_KEY:}
+  default-model: gpt-4o-mini
+  # Enables POST /api/dev/apply (direct apply bypassing proposals). Local only.
+  dev-mode: true
 
 logging:
   level:

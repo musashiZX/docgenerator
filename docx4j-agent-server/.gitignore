@@ -9,4 +9,5 @@ target/
 *.log
 docs/*.docx
 docs/.meta/*.json
+docs/.proposals/
 logs/

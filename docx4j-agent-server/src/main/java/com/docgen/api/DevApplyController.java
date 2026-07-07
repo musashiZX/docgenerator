@@ -23,12 +23,12 @@ import java.util.Map;
 
 /**
  * Dev-only direct batch apply, bypassing the proposal workflow.
- *
- * @deprecated Temporary until the Stage 5 propose/approve endpoints exist;
- * remove or gate behind a dev flag when ProposalService lands.
+ * Enabled only when {@code app.dev-mode=true} (local default); production
+ * traffic must go through {@code /api/proposals}.
  */
-@Deprecated
 @RestController
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+        name = "app.dev-mode", havingValue = "true")
 @RequestMapping("/api/dev")
 public class DevApplyController {
 

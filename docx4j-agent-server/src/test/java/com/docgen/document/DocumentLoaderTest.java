@@ -25,7 +25,8 @@ class DocumentLoaderTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        loader = new DocumentLoader(new AppProperties(tempDir.resolve("docs").toString()));
+        loader = new DocumentLoader(
+                new AppProperties(tempDir.resolve("docs").toString(), null, null, false));
     }
 
     @Test
