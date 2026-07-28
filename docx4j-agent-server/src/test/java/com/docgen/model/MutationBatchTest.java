@@ -3,6 +3,8 @@ package com.docgen.model;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
@@ -74,6 +76,39 @@ class MutationBatchTest {
         assertEquals(2, reparsed.mutations().size());
         assertInstanceOf(InsertMutation.class, reparsed.mutations().get(0));
         assertInstanceOf(DeleteMutation.class, reparsed.mutations().get(1));
+    }
+
+    @Test
+    void parsesTableRowInsertAndTableRowDelete() throws Exception {
+        String json = """
+                {
+                  "schema_version": 1,
+                  "explanation": "Add a component row and drop another.",
+                  "mutations": [
+                    {
+                      "op": "insert",
+                      "anchor_id": "dg_tbl0_r14_c1",
+                      "position": "after",
+                      "node_type": "table_row",
+                      "text": null,
+                      "style": null,
+                      "cells": ["PEANUT", "5%", "China"]
+                    },
+                    {
+                      "op": "delete",
+                      "target_id": "dg_tbl0_r15_c1",
+                      "node_type": "table_row"
+                    }
+                  ]
+                }
+                """;
+
+        MutationBatch batch = mapper.readValue(json, MutationBatch.class);
+        InsertMutation insert = assertInstanceOf(InsertMutation.class, batch.mutations().get(0));
+        assertEquals("table_row", insert.nodeType());
+        assertEquals(List.of("PEANUT", "5%", "China"), insert.cells());
+        DeleteMutation delete = assertInstanceOf(DeleteMutation.class, batch.mutations().get(1));
+        assertEquals("table_row", delete.nodeType());
     }
 
     @Test

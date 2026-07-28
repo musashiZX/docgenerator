@@ -90,7 +90,7 @@ class MutationValidatorTest {
         StructuralIndex tableIndex = new StructuralIndex("doc.docx", List.of(
                 new BlockDescriptor("dg_tbl0_r0_c0", "table_cell", "R0C0", 4, 1, 0, "Normal", 0, 0, 0)));
         MutationBatch batch = batch(
-                new InsertMutation("insert", "dg_tbl0_r0_c0", "after", "paragraph", "x", null));
+                new InsertMutation("insert", "dg_tbl0_r0_c0", "after", "paragraph", "x", null, null));
 
         List<MutationValidator.ValidationError> errors = validator.validate(batch, tableIndex);
         assertEquals("UNSUPPORTED_ANCHOR", errors.getFirst().code());
@@ -99,7 +99,7 @@ class MutationValidatorTest {
     @Test
     void insertWithBadPositionRejected() {
         MutationBatch batch = batch(
-                new InsertMutation("insert", "dg_p0", "above", "paragraph", "x", null));
+                new InsertMutation("insert", "dg_p0", "above", "paragraph", "x", null, null));
 
         List<MutationValidator.ValidationError> errors = validator.validate(batch, index);
         assertEquals("BAD_POSITION", errors.getFirst().code());
@@ -108,8 +108,8 @@ class MutationValidatorTest {
     @Test
     void insertAnchoredOnDeletedBlockRejected() {
         MutationBatch batch = batch(
-                new DeleteMutation("delete", "dg_p0"),
-                new InsertMutation("insert", "dg_p0", "after", "paragraph", "x", null));
+                new DeleteMutation("delete", "dg_p0", null),
+                new InsertMutation("insert", "dg_p0", "after", "paragraph", "x", null, null));
 
         List<MutationValidator.ValidationError> errors = validator.validate(batch, index);
         assertEquals("ANCHOR_DELETED", errors.getFirst().code());
@@ -119,7 +119,7 @@ class MutationValidatorTest {
     void deleteTableCellRejected() {
         StructuralIndex tableIndex = new StructuralIndex("doc.docx", List.of(
                 new BlockDescriptor("dg_tbl0_r0_c0", "table_cell", "R0C0", 4, 1, 0, "Normal", 0, 0, 0)));
-        MutationBatch batch = batch(new DeleteMutation("delete", "dg_tbl0_r0_c0"));
+        MutationBatch batch = batch(new DeleteMutation("delete", "dg_tbl0_r0_c0", null));
 
         List<MutationValidator.ValidationError> errors = validator.validate(batch, tableIndex);
         assertEquals("UNSUPPORTED_DELETE", errors.getFirst().code());
@@ -129,7 +129,7 @@ class MutationValidatorTest {
     void modifyAndDeleteSameTargetRejected() {
         MutationBatch batch = batch(
                 modify("dg_p0", "Hello", "Hi"),
-                new DeleteMutation("delete", "dg_p0"));
+                new DeleteMutation("delete", "dg_p0", null));
 
         List<MutationValidator.ValidationError> errors = validator.validate(batch, index);
         assertEquals("DUPLICATE_TARGET", errors.getFirst().code());
@@ -139,7 +139,7 @@ class MutationValidatorTest {
     void validMixedBatchHasNoErrors() {
         MutationBatch batch = batch(
                 modify("dg_p0", "Hello", "Hi"),
-                new InsertMutation("insert", "dg_p0", "after", "paragraph", "New paragraph", null));
+                new InsertMutation("insert", "dg_p0", "after", "paragraph", "New paragraph", null, null));
 
         assertTrue(validator.validate(batch, index).isEmpty());
     }
@@ -147,9 +147,9 @@ class MutationValidatorTest {
     @Test
     void consecutiveAfterInsertsOnSameAnchorAllowed() {
         MutationBatch batch = batch(
-                new InsertMutation("insert", "dg_p0", "after", "paragraph", "Line 1", null),
-                new InsertMutation("insert", "dg_p0", "after", "paragraph", "Line 2", null),
-                new InsertMutation("insert", "dg_p0", "after", "paragraph", "Line 3", null));
+                new InsertMutation("insert", "dg_p0", "after", "paragraph", "Line 1", null, null),
+                new InsertMutation("insert", "dg_p0", "after", "paragraph", "Line 2", null, null),
+                new InsertMutation("insert", "dg_p0", "after", "paragraph", "Line 3", null, null));
 
         assertTrue(validator.validate(batch, index).isEmpty());
     }

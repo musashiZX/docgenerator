@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document History — docx4j Agent</title>
+  <link rel="stylesheet" href="style.css?v=5">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-badge">docx4j</span>
+      <h1>Document History</h1>
+    </div>
+    <nav class="topnav">
+      <a class="nav-link" href="index.html">Console</a>
+      <a class="nav-link active" href="history.html">History</a>
+    </nav>
+    <div class="health" id="health">
+      <span class="dot" id="health-dot"></span>
+      <span id="health-text">checking…</span>
+    </div>
+  </header>
+
+  <main class="history-page">
+    <aside class="panel sidebar history-sidebar">
+      <div class="panel-head">
+        <h2>Document</h2>
+        <button class="btn ghost sm" id="btn-refresh-docs" title="Refresh list">&#8635;</button>
+      </div>
+      <ul class="doc-list" id="doc-list"></ul>
+    </aside>
+
+    <section class="panel history-main">
+      <div class="panel-head">
+        <h2 id="doc-title">Select a document</h2>
+      </div>
+      <div id="history-root" class="history-root">
+        <div class="recovery-empty">Select a document on the left.</div>
+      </div>
+    </section>
+  </main>
+
+  <script src="recovery-ui.js?v=1"></script>
+  <script src="history-page.js?v=1"></script>
+</body>
+</html>

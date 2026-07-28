@@ -40,20 +40,22 @@ public class MutationValidator {
             blocks.put(block.targetId(), block);
         }
 
-        // One content mutation (modify/delete) per target id; inserts have their
-        // own anchor+position uniqueness and may not anchor on a deleted block.
         Set<String> seenTargets = new HashSet<>();
         Set<String> deletedTargets = new HashSet<>();
         Set<String> seenAnchors = new HashSet<>();
+        Set<String> seenTableRowOps = new HashSet<>();
+        Set<String> seenTableColOps = new HashSet<>();
 
         for (int i = 0; i < batch.mutations().size(); i++) {
             Mutation mutation = batch.mutations().get(i);
             switch (mutation) {
                 case ModifyMutation modify -> validateModify(i, modify, blocks, seenTargets, errors);
                 case InsertMutation insert ->
-                        validateInsert(i, insert, batch.mutations(), blocks, seenAnchors, deletedTargets, errors);
+                        validateInsert(i, insert, batch.mutations(), blocks, seenAnchors,
+                                deletedTargets, seenTableRowOps, seenTableColOps, errors);
                 case DeleteMutation delete ->
-                        validateDelete(i, delete, blocks, seenTargets, deletedTargets, errors);
+                        validateDelete(i, delete, blocks, seenTargets, deletedTargets,
+                                seenTableRowOps, seenTableColOps, errors);
             }
         }
         return errors;
@@ -104,8 +106,19 @@ public class MutationValidator {
         if (countOccurrences(blockText, modify.oldText()) <= occurrence) {
             errors.add(new ValidationError(i, "OLD_TEXT_NOT_FOUND",
                     "old_text (occurrence " + occurrence + ") not found in " + targetId
-                            + ": \"" + modify.oldText() + "\""));
+                            + ": \"" + abbreviate(modify.oldText()) + "\""
+                            + ". Actual block text: \"" + abbreviate(blockText) + "\""));
         }
+    }
+
+    private static String abbreviate(String text) {
+        if (text == null) {
+            return "";
+        }
+        if (text.length() <= 120) {
+            return text;
+        }
+        return text.substring(0, 117) + "...";
     }
 
     private static void validateInsert(
@@ -115,6 +128,8 @@ public class MutationValidator {
             Map<String, BlockDescriptor> blocks,
             Set<String> seenAnchors,
             Set<String> deletedTargets,
+            Set<String> seenTableRowOps,
+            Set<String> seenTableColOps,
             List<ValidationError> errors) {
 
         String anchorId = insert.anchorId();
@@ -128,9 +143,9 @@ public class MutationValidator {
                     "anchor_id not in this document's index: " + anchorId));
             return;
         }
-        if (!"paragraph".equals(anchor.type())) {
-            errors.add(new ValidationError(i, "UNSUPPORTED_ANCHOR",
-                    "Insert anchors must be body paragraphs, not " + anchor.type() + ": " + anchorId));
+        if (!"before".equals(insert.position()) && !"after".equals(insert.position())) {
+            errors.add(new ValidationError(i, "BAD_POSITION",
+                    "position must be \"before\" or \"after\", got: " + insert.position()));
             return;
         }
         if (deletedTargets.contains(anchorId)) {
@@ -138,26 +153,71 @@ public class MutationValidator {
                     "Cannot anchor an insert on a block deleted in the same batch: " + anchorId));
             return;
         }
-        if (!"before".equals(insert.position()) && !"after".equals(insert.position())) {
-            errors.add(new ValidationError(i, "BAD_POSITION",
-                    "position must be \"before\" or \"after\", got: " + insert.position()));
+
+        if (insert.isTableRow() || insert.isTableColumn()) {
+            if (!"table_cell".equals(anchor.type())) {
+                errors.add(new ValidationError(i, "UNSUPPORTED_ANCHOR",
+                        insert.nodeType() + " insert requires a table_cell anchor, got "
+                                + anchor.type() + ": " + anchorId));
+                return;
+            }
+            Integer tableIndex = anchor.tableIndex();
+            Integer row = anchor.row();
+            Integer col = anchor.col();
+            if (tableIndex == null || row == null || col == null) {
+                errors.add(new ValidationError(i, "BAD_TABLE_ANCHOR",
+                        "table cell anchor is missing table/row/col metadata: " + anchorId));
+                return;
+            }
+            String structuralKey = insert.isTableRow()
+                    ? "row:" + tableIndex + ":" + row
+                    : "col:" + tableIndex + ":" + col;
+            Set<String> seen = insert.isTableRow() ? seenTableRowOps : seenTableColOps;
+            if (!seen.add(structuralKey + "#" + insert.position())) {
+                errors.add(new ValidationError(i, "DUPLICATE_TABLE_OP",
+                        "At most one " + insert.nodeType() + " insert per "
+                                + (insert.isTableRow() ? "row" : "column")
+                                + "+position per batch for " + anchorId));
+            }
+            if (insert.cells() != null) {
+                int physical = expectedCellCount(blocks, insert);
+                int content = expectedContentCellCount(blocks, insert);
+                int provided = countNonBlank(insert.cells());
+                if (physical > 0
+                        && insert.cells().size() != physical
+                        && (content <= 0 || insert.cells().size() != content)
+                        && (content <= 0 || provided != content)) {
+                    errors.add(new ValidationError(i, "BAD_CELLS_LENGTH",
+                            "cells length " + insert.cells().size()
+                                    + " must equal physical cells (" + physical + ")"
+                                    + " or non-blank content cells (" + content + ")"
+                                    + " for " + insert.nodeType() + " at " + anchorId));
+                }
+            }
             return;
         }
-        if (insert.nodeType() != null && !"paragraph".equals(insert.nodeType())) {
+
+        if (!insert.isParagraph()) {
             errors.add(new ValidationError(i, "UNSUPPORTED_NODE_TYPE",
-                    "Only node_type \"paragraph\" is supported in v1, got: " + insert.nodeType()));
+                    "node_type must be \"paragraph\", \"table_row\", or \"table_column\", got: "
+                            + insert.nodeType()));
+            return;
+        }
+        if (!"paragraph".equals(anchor.type())) {
+            errors.add(new ValidationError(i, "UNSUPPORTED_ANCHOR",
+                    "Paragraph insert anchors must be body paragraphs, not "
+                            + anchor.type() + ": " + anchorId));
             return;
         }
         if (insert.text() == null) {
-            errors.add(new ValidationError(i, "MISSING_TEXT", "text is required for insert"));
+            errors.add(new ValidationError(i, "MISSING_TEXT", "text is required for paragraph insert"));
             return;
         }
-        // Consecutive "after" inserts on the same anchor chain into multiple
-        // paragraphs (line 1, line 2, …). Only the first needs a unique slot.
         String anchorKey = anchorId + "#" + insert.position();
         if ("after".equals(insert.position()) && i > 0) {
             Mutation prev = mutations.get(i - 1);
             if (prev instanceof InsertMutation prevInsert
+                    && prevInsert.isParagraph()
                     && anchorId.equals(prevInsert.anchorId())
                     && "after".equals(prevInsert.position())) {
                 return;
@@ -171,12 +231,86 @@ public class MutationValidator {
         }
     }
 
+    private static int expectedCellCount(Map<String, BlockDescriptor> blocks, InsertMutation insert) {
+        BlockDescriptor anchor = blocks.get(insert.anchorId());
+        if (anchor == null || anchor.tableIndex() == null) {
+            return -1;
+        }
+        int tableIndex = anchor.tableIndex();
+        if (insert.isTableRow()) {
+            Integer row = anchor.row();
+            if (row == null) {
+                return -1;
+            }
+            int cols = 0;
+            for (BlockDescriptor block : blocks.values()) {
+                if ("table_cell".equals(block.type())
+                        && Integer.valueOf(tableIndex).equals(block.tableIndex())
+                        && Integer.valueOf(row).equals(block.row())) {
+                    cols++;
+                }
+            }
+            return cols;
+        }
+        if (insert.isTableColumn()) {
+            Integer col = anchor.col();
+            if (col == null) {
+                return -1;
+            }
+            int rows = 0;
+            for (BlockDescriptor block : blocks.values()) {
+                if ("table_cell".equals(block.type())
+                        && Integer.valueOf(tableIndex).equals(block.tableIndex())
+                        && Integer.valueOf(col).equals(block.col())) {
+                    rows++;
+                }
+            }
+            return rows;
+        }
+        return -1;
+    }
+
+    /** Non-blank cells in the template row (example content slots). */
+    private static int expectedContentCellCount(
+            Map<String, BlockDescriptor> blocks, InsertMutation insert) {
+        if (!insert.isTableRow()) {
+            return -1;
+        }
+        BlockDescriptor anchor = blocks.get(insert.anchorId());
+        if (anchor == null || anchor.tableIndex() == null || anchor.row() == null) {
+            return -1;
+        }
+        int count = 0;
+        for (BlockDescriptor block : blocks.values()) {
+            if ("table_cell".equals(block.type())
+                    && Integer.valueOf(anchor.tableIndex()).equals(block.tableIndex())
+                    && Integer.valueOf(anchor.row()).equals(block.row())
+                    && block.text() != null
+                    && !block.text().isBlank()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static int countNonBlank(List<String> cells) {
+        int count = 0;
+        for (String cell : cells) {
+            if (cell != null && !cell.isBlank()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     private static void validateDelete(
             int i,
             DeleteMutation delete,
             Map<String, BlockDescriptor> blocks,
             Set<String> seenTargets,
             Set<String> deletedTargets,
+            Set<String> seenTableRowOps,
+            Set<String> seenTableColOps,
             List<ValidationError> errors) {
 
         String targetId = delete.targetId();
@@ -190,9 +324,60 @@ public class MutationValidator {
                     "target_id not in this document's index: " + targetId));
             return;
         }
+
+        if (delete.isTableRow() || delete.isTableColumn()) {
+            if (!"table_cell".equals(block.type())) {
+                errors.add(new ValidationError(i, "UNSUPPORTED_DELETE",
+                        delete.nodeType() + " delete requires a table_cell target, got "
+                                + block.type() + ": " + targetId));
+                return;
+            }
+            Integer tableIndex = block.tableIndex();
+            Integer row = block.row();
+            Integer col = block.col();
+            if (tableIndex == null || row == null || col == null) {
+                errors.add(new ValidationError(i, "BAD_TABLE_TARGET",
+                        "table cell target is missing table/row/col metadata: " + targetId));
+                return;
+            }
+            String structuralKey = delete.isTableRow()
+                    ? "del-row:" + tableIndex + ":" + row
+                    : "del-col:" + tableIndex + ":" + col;
+            Set<String> seen = delete.isTableRow() ? seenTableRowOps : seenTableColOps;
+            if (!seen.add(structuralKey)) {
+                errors.add(new ValidationError(i, "DUPLICATE_TABLE_OP",
+                        "At most one " + delete.nodeType() + " delete per "
+                                + (delete.isTableRow() ? "row" : "column")
+                                + " per batch for " + targetId));
+                return;
+            }
+            // Mark all cells in that row/column as deleted so modify/insert cannot target them.
+            for (BlockDescriptor candidate : blocks.values()) {
+                if (!"table_cell".equals(candidate.type())
+                        || !Integer.valueOf(tableIndex).equals(candidate.tableIndex())) {
+                    continue;
+                }
+                boolean match = delete.isTableRow()
+                        ? Integer.valueOf(row).equals(candidate.row())
+                        : Integer.valueOf(col).equals(candidate.col());
+                if (match) {
+                    deletedTargets.add(candidate.targetId());
+                    seenTargets.add(candidate.targetId());
+                }
+            }
+            return;
+        }
+
+        if (!delete.isParagraph()) {
+            errors.add(new ValidationError(i, "UNSUPPORTED_NODE_TYPE",
+                    "delete node_type must be \"paragraph\", \"table_row\", or \"table_column\", got: "
+                            + delete.nodeType()));
+            return;
+        }
         if (!"paragraph".equals(block.type())) {
             errors.add(new ValidationError(i, "UNSUPPORTED_DELETE",
-                    "Only body paragraphs can be deleted in v1, not " + block.type() + ": " + targetId));
+                    "Only body paragraphs can be deleted without node_type table_row/table_column, not "
+                            + block.type() + ": " + targetId));
             return;
         }
         if (!seenTargets.add(targetId)) {

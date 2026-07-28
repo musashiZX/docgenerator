@@ -8,6 +8,8 @@ import com.docgen.model.ModifyMutation;
 import com.docgen.model.Mutation;
 import com.docgen.model.MutationBatch;
 import com.docgen.model.StructuralIndex;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
@@ -25,10 +27,13 @@ import java.util.Set;
 @Service
 public class MutationApplier {
 
+    private static final Logger log = LoggerFactory.getLogger(MutationApplier.class);
+
     private final MutationValidator validator;
     private final ModifyApplier modifyApplier;
     private final InsertApplier insertApplier;
     private final DeleteApplier deleteApplier;
+    private final TableStructuralApplier tableStructuralApplier;
     private final NodeHashGuard hashGuard;
 
     public MutationApplier(
@@ -36,11 +41,13 @@ public class MutationApplier {
             ModifyApplier modifyApplier,
             InsertApplier insertApplier,
             DeleteApplier deleteApplier,
+            TableStructuralApplier tableStructuralApplier,
             NodeHashGuard hashGuard) {
         this.validator = validator;
         this.modifyApplier = modifyApplier;
         this.insertApplier = insertApplier;
         this.deleteApplier = deleteApplier;
+        this.tableStructuralApplier = tableStructuralApplier;
         this.hashGuard = hashGuard;
     }
 
@@ -65,21 +72,46 @@ public class MutationApplier {
                         targetedIds.add(modify.targetId());
                     }
                     case InsertMutation insert -> {
-                        String chainKey = insert.anchorId() + "#after";
-                        String effectiveAnchor = "after".equals(insert.position())
-                                && insertChainTail.containsKey(chainKey)
-                                ? insertChainTail.get(chainKey)
-                                : insert.anchorId();
-                        String newId = insertApplier.apply(session.document(), insert, effectiveAnchor);
-                        if ("after".equals(insert.position())) {
-                            insertChainTail.put(chainKey, newId);
+                        if (insert.isTableRow()) {
+                            log.info("Applying table_row insert mutation: anchor={} position={} cells={}",
+                                    insert.anchorId(), insert.position(), insert.cells());
+                            List<String> newIds = tableStructuralApplier.insertRow(
+                                    session.document(), insert);
+                            targetedIds.addAll(newIds);
+                            createdIds.addAll(newIds);
+                        } else if (insert.isTableColumn()) {
+                            List<String> newIds = tableStructuralApplier.insertColumn(
+                                    session.document(), insert);
+                            targetedIds.addAll(newIds);
+                            createdIds.addAll(newIds);
+                        } else {
+                            String chainKey = insert.anchorId() + "#after";
+                            String effectiveAnchor = "after".equals(insert.position())
+                                    && insertChainTail.containsKey(chainKey)
+                                    ? insertChainTail.get(chainKey)
+                                    : insert.anchorId();
+                            String newId = insertApplier.apply(
+                                    session.document(), insert, effectiveAnchor);
+                            if ("after".equals(insert.position())) {
+                                insertChainTail.put(chainKey, newId);
+                            }
+                            targetedIds.add(newId);
+                            createdIds.add(newId);
                         }
-                        targetedIds.add(newId);
-                        createdIds.add(newId);
                     }
                     case DeleteMutation delete -> {
-                        deleteApplier.apply(session.document(), delete);
-                        targetedIds.add(delete.targetId());
+                        if (delete.isTableRow()) {
+                            Set<String> removed = tableStructuralApplier.deleteRow(
+                                    session.document(), delete);
+                            targetedIds.addAll(removed);
+                        } else if (delete.isTableColumn()) {
+                            Set<String> removed = tableStructuralApplier.deleteColumn(
+                                    session.document(), delete);
+                            targetedIds.addAll(removed);
+                        } else {
+                            deleteApplier.apply(session.document(), delete);
+                            targetedIds.add(delete.targetId());
+                        }
                     }
                 }
             }

@@ -26,7 +26,7 @@ class DocumentLoaderTest {
     @BeforeEach
     void setUp() throws Exception {
         loader = new DocumentLoader(
-                new AppProperties(tempDir.resolve("docs").toString(), null, null, false));
+                new AppProperties(tempDir.resolve("docs").toString(), null, null, null, false));
     }
 
     @Test
@@ -49,6 +49,19 @@ class DocumentLoaderTest {
 
         WordprocessingMLPackage reloaded = loader.load(saved);
         assertEquals("Hello", DocumentTestSupport.firstParagraphPlainText(reloaded));
+    }
+
+    @Test
+    void saveAndReloadPreservesWhitespaceOnlyRun() throws Exception {
+        Path source = tempDir.resolve("spaced-runs.docx");
+        FixtureFactory.writeParagraphWithRuns(source, "Product", " ", "name:");
+
+        WordprocessingMLPackage document = loader.load(source);
+        Path saved = tempDir.resolve("saved-spaced-runs.docx");
+        loader.save(document, saved);
+
+        WordprocessingMLPackage reloaded = loader.load(saved);
+        assertEquals("Product name:", DocumentTestSupport.firstParagraphPlainText(reloaded));
     }
 
     @Test

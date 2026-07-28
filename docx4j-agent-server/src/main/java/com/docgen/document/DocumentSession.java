@@ -25,6 +25,7 @@ public class DocumentSession {
     public byte[] snapshot() {
         try {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
+            TextSpacePreserver.ensurePreserved(document);
             document.save(out);
             return out.toByteArray();
         } catch (Exception e) {

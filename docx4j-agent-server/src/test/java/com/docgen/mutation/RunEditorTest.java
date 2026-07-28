@@ -62,7 +62,40 @@ class RunEditorTest {
         List<R> runs = runsOf(paragraph);
         assertEquals(1, runs.size(), "fully-consumed second run must be removed");
         assertSame(boldRun, runs.getFirst());
-        assertNotNull(runs.getFirst().getRPr().getB(), "replacement inherits bold from first spanned run");
+        assertNotNull(runs.getFirst().getRPr().getB(), "full rewrite inherits bold from first spanned run");
+    }
+
+    @Test
+    void versionLineReplacePreservesLabelBold() throws Exception {
+        P paragraph = firstParagraph(FixtureFactory.boldThenNormal("Version: ", "1.0"));
+        R boldRun = runsOf(paragraph).getFirst();
+        R normalRun = runsOf(paragraph).getLast();
+
+        RunEditor.replaceSpan(paragraph, 0, 12, "Version: 1.1");
+
+        assertEquals("Version: 1.1", TextUtils.getText(paragraph));
+        List<R> runs = runsOf(paragraph);
+        assertEquals(2, runs.size(), "label and value should stay in separate runs");
+        assertSame(boldRun, runs.getFirst());
+        assertSame(normalRun, runs.getLast());
+        assertNotNull(runs.getFirst().getRPr().getB(), "label run stays bold");
+        assertNull(runs.getLast().getRPr(), "version number run stays plain");
+    }
+
+    @Test
+    void strayPrefixRemovalPreservesBodyRunFormatting() throws Exception {
+        String body = "Facility: XYZ Plant";
+        P paragraph = firstParagraph(FixtureFactory.boldThenNormal("923925378479", body));
+        R bodyRun = runsOf(paragraph).getLast();
+        int fullLen = TextUtils.getText(paragraph).length();
+
+        RunEditor.replaceSpan(paragraph, 0, fullLen, body);
+
+        assertEquals(body, TextUtils.getText(paragraph));
+        List<R> runs = runsOf(paragraph);
+        assertEquals(1, runs.size(), "stray prefix run removed");
+        assertSame(bodyRun, runs.getFirst());
+        assertNull(runs.getFirst().getRPr(), "facility line keeps body formatting");
     }
 
     @Test

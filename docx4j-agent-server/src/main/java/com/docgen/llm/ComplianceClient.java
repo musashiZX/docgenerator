@@ -1,8 +1,11 @@
 package com.docgen.llm;
 
 import com.docgen.config.AppProperties;
+import com.docgen.model.FocusBlock;
 import com.docgen.model.MutationBatch;
 import com.docgen.model.StructuralIndex;
+import com.docgen.mutation.MutationBatchAligner;
+import com.docgen.mutation.MutationBatchSalvager;
 import com.docgen.mutation.MutationValidator;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,6 +18,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Turns a natural-language request + structural index into a validated
@@ -25,7 +29,8 @@ import java.util.List;
 public class ComplianceClient {
 
     private static final Logger log = LoggerFactory.getLogger(ComplianceClient.class);
-    private static final int MAX_RETRIES = 2;
+    private static final int MAX_RETRIES = 1;
+    public static final String BULK_REPLACE_MODEL = "bulk-replace";
 
     private final AppProperties properties;
     private final ObjectMapper mapper;
@@ -51,11 +56,17 @@ public class ComplianceClient {
     }
 
     public LlmProposal propose(String request, StructuralIndex index, String modelOverride) {
-        return propose(request, index, modelOverride, null);
+        return propose(request, index, modelOverride, List.of(), null);
     }
 
     public LlmProposal propose(String request, StructuralIndex index,
                                String modelOverride, String selectedText) {
+        return propose(request, index, modelOverride, List.of(), selectedText);
+    }
+
+    public LlmProposal propose(String request, StructuralIndex index,
+                               String modelOverride, List<FocusBlock> focusBlocks,
+                               String legacySelectedText) {
         String apiKey = properties.openaiApiKey();
         if (apiKey == null || apiKey.isBlank()) {
             throw new IllegalStateException(
@@ -65,15 +76,39 @@ public class ComplianceClient {
                 ? properties.defaultModel()
                 : modelOverride;
 
+        Optional<MutationBatch> bulk = BulkReplacePlanner.tryPlan(request, index);
+        if (bulk.isPresent() && !bulk.get().mutations().isEmpty()) {
+            List<MutationValidator.ValidationError> bulkErrors =
+                    validator.validate(bulk.get(), index);
+            if (bulkErrors.isEmpty()) {
+                log.info("Bulk replace produced {} mutation(s) without LLM",
+                        bulk.get().mutations().size());
+                return new LlmProposal(bulk.get(), BULK_REPLACE_MODEL);
+            }
+            log.warn("Bulk replace plan invalid, falling back to LLM: {}", bulkErrors);
+        }
+
+        StructuralIndex promptIndex = IndexScoper.scopeForLlm(request, index);
+        if (promptIndex.blocks().size() < index.blocks().size()) {
+            log.info("Scoped LLM index {} -> {} blocks",
+                    index.blocks().size(), promptIndex.blocks().size());
+        }
+
         ArrayNode messages = mapper.createArrayNode();
         messages.add(message("system", CompliancePrompts.SYSTEM));
-        messages.add(message("user", CompliancePrompts.userMessage(request, index, selectedText)));
+        messages.add(message("user",
+                CompliancePrompts.userMessage(request, promptIndex, focusBlocks, legacySelectedText)));
 
         List<MutationValidator.ValidationError> lastErrors = null;
         boolean retriedEmpty = false;
         for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             String content = chat(apiKey, model, messages);
-            MutationBatch batch = parseBatch(content);
+            MutationBatch batch = TableRowAnchorRepair.repair(
+                    request, MutationBatchAligner.alignToIndex(parseBatch(content), index), index);
+            if (batch.explanation() != null
+                    && batch.explanation().contains("Repaired table_row anchor")) {
+                log.info("Repaired table_row anchor from request text match");
+            }
 
             if (batch.mutations() == null || batch.mutations().isEmpty()) {
                 if (!retriedEmpty) {
@@ -97,10 +132,29 @@ public class ComplianceClient {
                 return new LlmProposal(batch, model);
             }
 
+            Optional<MutationBatch> salvaged = MutationBatchSalvager.dropInvalid(batch, lastErrors);
+            if (salvaged.isPresent()) {
+                List<MutationValidator.ValidationError> salvageErrors =
+                        validator.validate(salvaged.get(), index);
+                if (salvageErrors.isEmpty() && !salvaged.get().mutations().isEmpty()) {
+                    log.warn("Accepted partial LLM batch ({} of {} mutations)",
+                            salvaged.get().mutations().size(), batch.mutations().size());
+                    return new LlmProposal(salvaged.get(), model);
+                }
+            }
+
             log.warn("LLM batch failed validation on attempt {}: {}", attempt + 1, lastErrors);
-            messages.add(message("assistant", content));
-            messages.add(message("user", CompliancePrompts.retryMessage(formatErrors(lastErrors))));
+            if (attempt < MAX_RETRIES) {
+                messages.add(message("assistant", content));
+                String retry = CompliancePrompts.retryMessage(formatErrors(lastErrors));
+                String rowHint = TableRowAnchorRepair.retryHint(request, index);
+                if (!rowHint.isBlank()) {
+                    retry = retry + "\n" + rowHint;
+                }
+                messages.add(message("user", retry));
+            }
         }
+
         throw new MutationValidator.MutationValidationException(lastErrors);
     }
 

@@ -61,6 +61,7 @@ public class DocumentLoader {
     public void save(WordprocessingMLPackage document, Path path) {
         try {
             Files.createDirectories(path.getParent());
+            TextSpacePreserver.ensurePreserved(document);
             document.save(path.toFile());
         } catch (Exception e) {
             throw new DocumentLoadException("Could not save document: " + path, e);

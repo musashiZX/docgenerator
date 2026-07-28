@@ -27,7 +27,7 @@ class ProposalStoreTest {
     @BeforeEach
     void setUp() throws Exception {
         DocumentLoader loader = new DocumentLoader(
-                new AppProperties(tempDir.resolve("docs").toString(), null, null, false));
+                new AppProperties(tempDir.resolve("docs").toString(), null, null, null, false));
         store = new ProposalStore(loader, new ObjectMapper());
     }
 

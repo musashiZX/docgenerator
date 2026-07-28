@@ -2,6 +2,7 @@ package com.docgen.proposal;
 
 import com.docgen.document.DocumentLoader;
 import com.docgen.document.DocumentSession;
+import com.docgen.recovery.DocumentWorkspace;
 import com.docgen.index.BookmarkIndexer;
 import com.docgen.index.StructuralIndexBuilder;
 import com.docgen.model.ApplyResult;
@@ -14,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -39,6 +41,7 @@ public class ProposalService {
     private final MutationApplier mutationApplier;
     private final ProposalStore store;
     private final com.docgen.document.DocumentLibraryService libraryService;
+    private final DocumentWorkspace workspace;
 
     public ProposalService(
             DocumentLoader documentLoader,
@@ -46,13 +49,15 @@ public class ProposalService {
             StructuralIndexBuilder indexBuilder,
             MutationApplier mutationApplier,
             ProposalStore store,
-            com.docgen.document.DocumentLibraryService libraryService) {
+            com.docgen.document.DocumentLibraryService libraryService,
+            DocumentWorkspace workspace) {
         this.documentLoader = documentLoader;
         this.bookmarkIndexer = bookmarkIndexer;
         this.indexBuilder = indexBuilder;
         this.mutationApplier = mutationApplier;
         this.store = store;
         this.libraryService = libraryService;
+        this.workspace = workspace;
     }
 
     /**
@@ -91,6 +96,9 @@ public class ProposalService {
         store.save(proposal, before);
         log.info("Proposal {} created for {} ({} mutations, source={})",
                 proposal.id(), docName, batch.mutations().size(), source);
+        for (var mutation : batch.mutations()) {
+            log.info("Proposal {} mutation: {}", proposal.id(), mutation);
+        }
         return proposal;
     }
 
@@ -102,6 +110,9 @@ public class ProposalService {
         Proposal proposal = requirePending(proposalId);
 
         Path path = documentLoader.resolveDoc(proposal.docName());
+        byte[] beforeShadow = Files.readAllBytes(path);
+        workspace.createCheckpointOnApprove(proposal.docName(), proposalId, beforeShadow);
+
         WordprocessingMLPackage document = documentLoader.load(path);
         bookmarkIndexer.ensureBookmarks(document);
         StructuralIndex index = indexBuilder.build(document, proposal.docName());
@@ -123,6 +134,18 @@ public class ProposalService {
         store.update(rejected);
         log.info("Proposal {} rejected", proposalId);
         return rejected;
+    }
+
+    /** Reject every PENDING proposal for a document (used when resetting test baselines). */
+    public int rejectAllPending(String docName) {
+        int count = 0;
+        for (Proposal proposal : list(docName)) {
+            if (proposal.status() == ProposalStatus.PENDING) {
+                reject(proposal.id());
+                count++;
+            }
+        }
+        return count;
     }
 
     public Proposal get(String proposalId) {

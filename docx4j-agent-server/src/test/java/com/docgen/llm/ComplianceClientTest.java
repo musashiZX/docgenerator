@@ -38,7 +38,7 @@ class ComplianceClientTest {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.openai.com");
         server = MockRestServiceServer.bindTo(builder).build();
         client = new ComplianceClient(
-                new AppProperties("docs", "test-key", "gpt-4o-mini", false),
+                new AppProperties("docs", null, "test-key", "gpt-4o-mini", false),
                 new ObjectMapper(),
                 new MutationValidator(),
                 builder.build());
@@ -91,7 +91,7 @@ class ComplianceClientTest {
 
     @Test
     void persistentlyInvalidBatchFailsAfterRetries() {
-        for (int i = 0; i < 3; i++) { // initial + 2 retries
+        for (int i = 0; i < 2; i++) { // initial + 1 retry
             server.expect(requestTo("https://api.openai.com/v1/chat/completions"))
                     .andRespond(withSuccess(chatResponse("""
                             {"schema_version":1,"explanation":"edit",
@@ -102,8 +102,48 @@ class ComplianceClientTest {
 
         MutationValidator.MutationValidationException ex = assertThrows(
                 MutationValidator.MutationValidationException.class,
-                () -> client.propose("bad", index, null));
+                () -> client.propose("Harmonize the alpha paragraph", index, null));
         assertTrue(ex.errors().stream().anyMatch(e -> e.code().equals("UNKNOWN_TARGET")));
+        server.verify();
+    }
+
+    @Test
+    void bulkReplaceSkipsLlmForTableFindReplace() {
+        StructuralIndex tableIndex = new StructuralIndex("doc.docx", List.of(
+                block("dg_tbl0_r1_c3", "table_cell", "Food Safety"),
+                block("dg_tbl0_r3_c3", "table_cell", "Food Safety"),
+                block("dg_tbl2_r5_c1", "table_cell", "TRN-01, TRN-02")));
+
+        ComplianceClient.LlmProposal proposal = client.propose(
+                "Change all the 'Food Safety' in the tables to 'Food Safe'", tableIndex, null);
+
+        assertEquals(ComplianceClient.BULK_REPLACE_MODEL, proposal.model());
+        assertEquals(2, proposal.batch().mutations().size());
+        server.verify();
+    }
+
+    @Test
+    void alignsInvalidLlmMutationsOnFirstAttempt() {
+        StructuralIndex tableIndex = new StructuralIndex("doc.docx", List.of(
+                block("dg_p0", "paragraph", "Food Safety"),
+                block("dg_tbl4_r2_c2", "table_cell", "TRN-01, TRN-02, TRN-03")));
+
+        server.expect(requestTo("https://api.openai.com/v1/chat/completions"))
+                .andRespond(withSuccess(chatResponse("""
+                        {"schema_version":1,"explanation":"Food Safety rename",
+                         "mutations":[
+                           {"op":"modify","target_id":"dg_p0",
+                             "old_text":"Food Safety","occurrence":0,"new_text":"Food Safe"},
+                           {"op":"modify","target_id":"dg_tbl4_r2_c2",
+                             "old_text":"Food Safety","occurrence":0,"new_text":"Food Safe"}
+                         ]}
+                        """), MediaType.APPLICATION_JSON));
+
+        ComplianceClient.LlmProposal proposal = client.propose(
+                "Please update every 'Food Safety' label to read 'Food Safe'", tableIndex, null);
+
+        assertEquals(1, proposal.batch().mutations().size());
+        assertEquals("dg_p0", ((ModifyMutation) proposal.batch().mutations().get(0)).targetId());
         server.verify();
     }
 
@@ -146,7 +186,7 @@ class ComplianceClientTest {
     @Test
     void missingApiKeyFailsFast() {
         ComplianceClient noKey = new ComplianceClient(
-                new AppProperties("docs", "", null, false),
+                new AppProperties("docs", null, "", null, false),
                 new ObjectMapper(), new MutationValidator(),
                 RestClient.builder().build());
         assertThrows(IllegalStateException.class, () -> noKey.propose("x", index, null));

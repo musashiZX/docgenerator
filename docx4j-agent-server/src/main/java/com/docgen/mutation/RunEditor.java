@@ -10,9 +10,9 @@ import java.util.List;
 
 /**
  * Low-level run surgery: replaces a character span of one paragraph while
- * preserving run properties (w:rPr). The replacement text inherits the
- * formatting of the first run in the span because that run's w:t is edited
- * in place; runs outside the span are never touched.
+ * preserving run properties (w:rPr). When old and new text share a prefix or
+ * suffix, only the differing middle is edited so label/value runs keep their
+ * formatting. Pure appends insert into the run at the boundary.
  */
 public final class RunEditor {
 
@@ -32,6 +32,24 @@ public final class RunEditor {
         if (start < 0 || end > index.fullText().length() || start > end) {
             throw new IllegalArgumentException(
                     "Span [" + start + "," + end + ") out of range 0.." + index.fullText().length());
+        }
+        String oldSlice = index.fullText().substring(start, end);
+        if (!oldSlice.equals(newText)) {
+            int prefixLen = commonPrefixLength(oldSlice, newText);
+            int suffixLen = commonSuffixLength(oldSlice, newText, prefixLen);
+            if (prefixLen + suffixLen < oldSlice.length() || prefixLen + suffixLen < newText.length()) {
+                int midStart = start + prefixLen;
+                int midEnd = end - suffixLen;
+                String midNew = newText.substring(prefixLen, newText.length() - suffixLen);
+                if (midStart != start || midEnd != end || !midNew.equals(newText)) {
+                    if (midStart == midEnd && !midNew.isEmpty()) {
+                        insertAt(paragraph, midStart, midNew);
+                        return;
+                    }
+                    replaceSpan(paragraph, midStart, midEnd, midNew);
+                    return;
+                }
+            }
         }
         List<BlockTextIndex.Segment> affected = index.segmentsOverlapping(start, end);
         if (affected.isEmpty()) {
@@ -59,6 +77,19 @@ public final class RunEditor {
         removeEmptied(paragraph, affected);
     }
 
+    /** Insert text at a position inside (or at end of) an existing run, preserving that run's rPr. */
+    private static void insertAt(P paragraph, int position, String text) {
+        BlockTextIndex index = BlockTextIndex.of(paragraph);
+        for (BlockTextIndex.Segment segment : index.segments()) {
+            if (position >= segment.start() && position <= segment.end()) {
+                int offset = position - segment.start();
+                replaceSpanSingleRun(segment.text(), offset, offset, text);
+                return;
+            }
+        }
+        throw new IllegalArgumentException("Insert position " + position + " is not inside any run.");
+    }
+
     private static void setText(Text text, String value) {
         text.setValue(value);
         text.setSpace("preserve");
@@ -79,5 +110,23 @@ public final class RunEditor {
 
     private static void removeRun(P paragraph, R run) {
         paragraph.getContent().removeIf(node -> XmlUtils.unwrap(node) == run);
+    }
+
+    static int commonPrefixLength(String a, String b) {
+        int limit = Math.min(a.length(), b.length());
+        int i = 0;
+        while (i < limit && a.charAt(i) == b.charAt(i)) {
+            i++;
+        }
+        return i;
+    }
+
+    static int commonSuffixLength(String a, String b, int prefixLen) {
+        int max = Math.min(a.length() - prefixLen, b.length() - prefixLen);
+        int i = 0;
+        while (i < max && a.charAt(a.length() - 1 - i) == b.charAt(b.length() - 1 - i)) {
+            i++;
+        }
+        return i;
     }
 }

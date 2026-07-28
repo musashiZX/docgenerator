@@ -11,6 +11,8 @@ spring:
 
 app:
   docs-dir: docs
+  # Repo root (golden test docs live in {repo-root}/docs/)
+  repo-root: ..
   # Loaded from repo-root .env via spring.config.import (OPENAI_API_KEY=...)
   openai-api-key: ${OPENAI_API_KEY:}
   default-model: gpt-4o-mini

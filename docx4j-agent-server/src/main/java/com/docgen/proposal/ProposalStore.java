@@ -70,6 +70,9 @@ public class ProposalStore {
 
     /** All proposals, newest first; optionally filtered by document name. */
     public List<Proposal> list(String docName) {
+        if (!Files.isDirectory(proposalsDir)) {
+            return List.of();
+        }
         try (Stream<Path> dirs = Files.list(proposalsDir)) {
             List<Proposal> proposals = new ArrayList<>();
             dirs.filter(Files::isDirectory).forEach(dir ->

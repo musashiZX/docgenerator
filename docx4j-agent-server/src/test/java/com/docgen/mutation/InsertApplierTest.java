@@ -33,7 +33,7 @@ class InsertApplierTest {
     @Test
     void insertAfterAnchorAppearsInOrder() throws Exception {
         String newId = applier.apply(document,
-                new InsertMutation("insert", "dg_p1", "after", "paragraph", "Inserted", null));
+                new InsertMutation("insert", "dg_p1", "after", "paragraph", "Inserted", null, null));
 
         assertEquals("dg_p3", newId, "new paragraph takes the next free dg_p ordinal");
         assertEquals(List.of("Alpha", "Bravo", "Inserted", "Charlie"), textsInOrder());
@@ -42,7 +42,7 @@ class InsertApplierTest {
     @Test
     void insertBeforeAnchor() throws Exception {
         applier.apply(document,
-                new InsertMutation("insert", "dg_p0", "before", "paragraph", "Preamble", null));
+                new InsertMutation("insert", "dg_p0", "before", "paragraph", "Preamble", null, null));
 
         assertEquals(List.of("Preamble", "Alpha", "Bravo", "Charlie"), textsInOrder());
     }
@@ -52,7 +52,7 @@ class InsertApplierTest {
         List<String> idsBefore = idsInOrder();
 
         String newId = applier.apply(document,
-                new InsertMutation("insert", "dg_p1", "after", "paragraph", "Inserted", null));
+                new InsertMutation("insert", "dg_p1", "after", "paragraph", "Inserted", null, null));
 
         List<String> idsAfter = idsInOrder();
         idsAfter.remove(newId);
@@ -65,7 +65,7 @@ class InsertApplierTest {
         new BookmarkIndexer().ensureBookmarks(tableDoc);
 
         assertThrows(IllegalArgumentException.class, () -> applier.apply(tableDoc,
-                new InsertMutation("insert", "dg_tbl0_r0_c0", "after", "paragraph", "x", null)));
+                new InsertMutation("insert", "dg_tbl0_r0_c0", "after", "paragraph", "x", null, null)));
     }
 
     private List<String> textsInOrder() throws Exception {

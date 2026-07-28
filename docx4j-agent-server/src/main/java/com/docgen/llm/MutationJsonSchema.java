@@ -69,16 +69,35 @@ public final class MutationJsonSchema {
         ObjectNode schema = objectSchema(mapper);
         ObjectNode props = (ObjectNode) schema.get("properties");
         enumString(props, "op", "insert");
-        string(props, "anchor_id", "target_id of an existing body paragraph (type=paragraph) to insert next to.");
+        string(props, "anchor_id",
+                "For paragraph: a type=paragraph id. For table_row/table_column: a type=table_cell id "
+                        + "in the template row/column to clone.");
         ObjectNode position = props.putObject("position");
         position.put("type", "string");
         position.putArray("enum").add("before").add("after");
-        enumString(props, "node_type", "paragraph");
-        string(props, "text", "Full text of the new paragraph.");
+        ObjectNode nodeType = props.putObject("node_type");
+        nodeType.put("type", "string");
+        nodeType.putArray("enum").add("paragraph").add("table_row").add("table_column");
+        nodeType.put("description",
+                "paragraph = body paragraph; table_row/table_column = clone a dataframe table row/column.");
+
+        ObjectNode text = props.putObject("text");
+        text.putArray("type").add("string").add("null");
+        text.put("description", "Required for paragraph inserts. Null for table_row/table_column.");
+
         ObjectNode style = props.putObject("style");
         style.putArray("type").add("string").add("null");
         style.put("description", "Optional paragraph style name; null copies the anchor's style.");
-        required(schema, "op", "anchor_id", "position", "node_type", "text", "style");
+
+        ObjectNode cells = props.putObject("cells");
+        cells.putArray("type").add("array").add("null");
+        cells.put("description",
+                "For table_row: one string per column. For table_column: one string per row. "
+                        + "Null clones the template texts. Null for paragraph inserts.");
+        ObjectNode cellItems = cells.putObject("items");
+        cellItems.put("type", "string");
+
+        required(schema, "op", "anchor_id", "position", "node_type", "text", "style", "cells");
         return schema;
     }
 
@@ -86,8 +105,14 @@ public final class MutationJsonSchema {
         ObjectNode schema = objectSchema(mapper);
         ObjectNode props = (ObjectNode) schema.get("properties");
         enumString(props, "op", "delete");
-        string(props, "target_id", "target_id of the body paragraph (type=paragraph) to remove entirely.");
-        required(schema, "op", "target_id");
+        string(props, "target_id",
+                "For paragraph: body paragraph id. For table_row/table_column: any cell id in that row/column.");
+        ObjectNode nodeType = props.putObject("node_type");
+        nodeType.put("type", "string");
+        nodeType.putArray("enum").add("paragraph").add("table_row").add("table_column");
+        nodeType.put("description",
+                "paragraph removes one body paragraph; table_row/table_column remove a whole row/column.");
+        required(schema, "op", "target_id", "node_type");
         return schema;
     }
 

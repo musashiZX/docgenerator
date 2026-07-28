@@ -56,6 +56,7 @@ class GoldenModifyTest {
                 new ModifyApplier(new BookmarkResolver()),
                 new InsertApplier(new BookmarkResolver(), new BookmarkIndexer()),
                 new DeleteApplier(new BookmarkResolver()),
+                new TableStructuralApplier(new BookmarkResolver(), new BookmarkIndexer()),
                 new NodeHashGuard(indexBuilder));
         applier.apply(session, batch, index);
 

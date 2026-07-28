@@ -3,6 +3,7 @@ package com.docgen.api;
 import com.docgen.document.DocumentIndexService;
 import com.docgen.llm.ComplianceClient;
 import com.docgen.model.ApplyResult;
+import com.docgen.model.FocusBlock;
 import com.docgen.model.MutationBatch;
 import com.docgen.model.StructuralIndex;
 import com.docgen.proposal.Proposal;
@@ -38,7 +39,8 @@ public class ProposalController {
             MutationBatch batch,
             String message,
             String model,
-            @JsonProperty("selected_text") String selectedText
+            @JsonProperty("selected_text") String selectedText,
+            @JsonProperty("selected_blocks") List<FocusBlock> selectedBlocks
     ) {
     }
 
@@ -80,7 +82,8 @@ public class ProposalController {
                 traceId, request.docName(), request.message());
         StructuralIndex index = documentIndexService.buildIndex(request.docName());
         ComplianceClient.LlmProposal llm = complianceClient.propose(
-                request.message(), index, request.model(), request.selectedText());
+                request.message(), index, request.model(),
+                request.selectedBlocks(), request.selectedText());
         return proposalService.propose(
                 request.docName(), llm.batch(), "llm", request.message(), llm.model());
     }

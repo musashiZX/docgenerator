@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>docx4j Agent Console</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
   <header class="topbar">
@@ -12,6 +12,10 @@
       <span class="brand-badge">docx4j</span>
       <h1>Agent Console</h1>
     </div>
+    <nav class="topnav">
+      <a class="nav-link active" href="index.html">Console</a>
+      <a class="nav-link" href="history.html" id="nav-history">History</a>
+    </nav>
     <div class="health" id="health">
       <span class="dot" id="health-dot"></span>
       <span id="health-text">checking…</span>
@@ -41,10 +45,16 @@
           <div class="view-tabs" id="view-tabs">
             <button class="tab active" data-view="blocks" id="tab-blocks">Blocks</button>
             <button class="tab" data-view="preview" id="tab-preview">Preview</button>
+            <button class="tab" data-view="history" id="tab-history">History</button>
           </div>
+          <span class="head-badge" id="head-badge" hidden title="Latest committed snapshot"></span>
           <button class="btn ghost sm" id="btn-refresh-index">&#8635; Re-index</button>
           <a class="btn ghost sm" id="btn-download" href="#" download>&#8681; Download</a>
         </div>
+      </div>
+      <div class="ft-banner" id="ft-banner" hidden>
+        <span class="ft-banner-label">Functional test</span>
+        <span id="ft-banner-title"></span>
       </div>
       <p class="hint" id="index-hint">
         Upload or pick a document on the left. Its block index (with stable
@@ -52,7 +62,8 @@
         <b>+&#8593;</b>/<b>+&#8595;</b> to insert a paragraph before/after, and <b>Del</b>
         to delete a paragraph (paragraphs only — table cells support Edit).
         Switch to <b>Preview</b> to see the rendered document — hover any text to see its
-        <code>target_id</code>, click to jump to its row.
+        <code>target_id</code>, click for actions, <b>Ctrl+click</b> to focus blocks for AI
+        (multiple allowed). Click a Blocks row to focus one block; Ctrl+click to add/remove.
       </p>
       <div class="preview-wrap" id="preview-wrap" hidden>
         <div class="preview-loading" id="preview-loading">Rendering preview&#8230;</div>
@@ -61,6 +72,9 @@
           <div class="preview-menu-head"><span class="tid" id="preview-menu-id"></span></div>
           <div class="preview-menu-actions" id="preview-menu-actions"></div>
         </div>
+      </div>
+      <div class="history-wrap" id="history-wrap" hidden>
+        <div id="history-panel-mount"></div>
       </div>
       <div class="table-wrap" id="table-wrap" hidden>
         <table class="blocks">
@@ -83,6 +97,32 @@
 
     <!-- ============ Mutation composer ============ -->
     <aside class="panel composer">
+      <div class="ft-runner" id="ft-runner">
+        <div class="panel-head">
+          <h2>Functional tests</h2>
+          <button class="btn ghost sm" id="ft-btn-stop" hidden title="Stop runner">Stop</button>
+        </div>
+        <div id="ft-idle">
+          <p class="hint">Runs each prompt like a manual test: restores golden file, fills <b>AI edit</b>, proposes, you <b>Approve &amp; save</b>, then mark Pass/Fail. Document rolls back before the next test.</p>
+          <div class="ft-actions">
+            <button class="btn primary" id="ft-btn-start">Start tests</button>
+            <label class="ft-check"><input type="checkbox" id="ft-include-negative"> Include negative tests</label>
+          </div>
+        </div>
+        <div id="ft-active" hidden>
+          <div class="ft-progress" id="ft-progress"></div>
+          <div class="ft-test-meta" id="ft-test-meta"></div>
+          <p class="hint" id="ft-expected"></p>
+          <p class="ft-status" id="ft-status"></p>
+          <div class="ft-verdict" id="ft-verdict" hidden>
+            <button class="btn primary" id="ft-pass" hidden>Pass</button>
+            <button class="btn ghost danger-text" id="ft-fail" hidden>Fail</button>
+            <button class="btn ghost" id="ft-skip">Skip test</button>
+            <button class="btn ghost danger-text" id="ft-reject-fail" hidden>Fail (reject proposal)</button>
+          </div>
+        </div>
+      </div>
+
       <div class="panel-head">
         <h2>AI edit</h2>
       </div>
@@ -132,6 +172,7 @@
     </aside>
   </main>
 
-  <script src="app.js"></script>
+  <script src="recovery-ui.js?v=1"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>

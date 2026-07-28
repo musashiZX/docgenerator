@@ -8,6 +8,7 @@ import org.docx4j.wml.P;
 import org.springframework.stereotype.Component;
 
 import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -79,6 +80,150 @@ public class BookmarkIndexer {
         String name = "dg_p" + nextOrdinal;
         addBookmark(paragraph, name, maxBookmarkNumericId(document) + 1);
         return name;
+    }
+
+    /** Bookmarks each cell in a newly inserted row; returns cell target ids in column order. */
+    public List<String> bookmarkNewTableRow(
+            WordprocessingMLPackage document, int tableIndex, List<P> cellParagraphs) {
+        Set<String> existing = collectBookmarkNames(document);
+        int row = nextFreeTableRow(existing, tableIndex);
+        while (true) {
+            boolean free = true;
+            for (int col = 0; col < cellParagraphs.size(); col++) {
+                if (existing.contains("dg_tbl" + tableIndex + "_r" + row + "_c" + col)) {
+                    free = false;
+                    break;
+                }
+            }
+            if (free) {
+                break;
+            }
+            row++;
+        }
+        List<String> ids = new ArrayList<>();
+        long nextId = maxBookmarkNumericId(document) + 1;
+        for (int col = 0; col < cellParagraphs.size(); col++) {
+            String name = "dg_tbl" + tableIndex + "_r" + row + "_c" + col;
+            addBookmark(cellParagraphs.get(col), name, nextId++);
+            existing.add(name);
+            ids.add(name);
+        }
+        return ids;
+    }
+
+    /** Bookmarks each cell in a newly inserted column; returns cell target ids in row order. */
+    public List<String> bookmarkNewTableColumn(
+            WordprocessingMLPackage document, int tableIndex, List<P> cellParagraphs) {
+        Set<String> existing = collectBookmarkNames(document);
+        int col = nextFreeTableColAcross(existing, tableIndex);
+        while (true) {
+            boolean free = true;
+            for (int row = 0; row < cellParagraphs.size(); row++) {
+                if (existing.contains("dg_tbl" + tableIndex + "_r" + row + "_c" + col)) {
+                    free = false;
+                    break;
+                }
+            }
+            if (free) {
+                break;
+            }
+            col++;
+        }
+        List<String> ids = new ArrayList<>();
+        long nextId = maxBookmarkNumericId(document) + 1;
+        for (int row = 0; row < cellParagraphs.size(); row++) {
+            String name = "dg_tbl" + tableIndex + "_r" + row + "_c" + col;
+            addBookmark(cellParagraphs.get(row), name, nextId++);
+            existing.add(name);
+            ids.add(name);
+        }
+        return ids;
+    }
+
+    static int nextFreeTableRow(Set<String> existing, int tableIndex) {
+        int max = -1;
+        String prefix = "dg_tbl" + tableIndex + "_r";
+        for (String name : existing) {
+            if (!name.startsWith(prefix)) {
+                continue;
+            }
+            int row = parseTableRow(name, tableIndex);
+            if (row >= 0) {
+                max = Math.max(max, row);
+            }
+        }
+        return max + 1;
+    }
+
+    static int nextFreeTableCol(Set<String> existing, int tableIndex, int row) {
+        int max = -1;
+        String prefix = "dg_tbl" + tableIndex + "_r" + row + "_c";
+        for (String name : existing) {
+            if (!name.startsWith(prefix)) {
+                continue;
+            }
+            try {
+                max = Math.max(max, Integer.parseInt(name.substring(prefix.length())));
+            } catch (NumberFormatException ignored) {
+                // skip
+            }
+        }
+        return max + 1;
+    }
+
+    static int nextFreeTableColAcross(Set<String> existing, int tableIndex) {
+        int max = -1;
+        String prefix = "dg_tbl" + tableIndex + "_r";
+        for (String name : existing) {
+            if (!name.startsWith(prefix)) {
+                continue;
+            }
+            int col = parseTableCol(name, tableIndex);
+            if (col >= 0) {
+                max = Math.max(max, col);
+            }
+        }
+        return max + 1;
+    }
+
+    static int nextFreeTableRowForCol(Set<String> existing, int tableIndex, int col) {
+        int row = 0;
+        while (existing.contains("dg_tbl" + tableIndex + "_r" + row + "_c" + col)) {
+            row++;
+        }
+        return row;
+    }
+
+    static int parseTableRow(String name, int tableIndex) {
+        String prefix = "dg_tbl" + tableIndex + "_r";
+        if (!name.startsWith(prefix)) {
+            return -1;
+        }
+        int cAt = name.indexOf("_c", prefix.length());
+        if (cAt < 0) {
+            return -1;
+        }
+        try {
+            return Integer.parseInt(name.substring(prefix.length(), cAt));
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    static int parseTableCol(String name, int tableIndex) {
+        String prefix = "dg_tbl" + tableIndex + "_r";
+        if (!name.startsWith(prefix)) {
+            return -1;
+        }
+        int cAt = name.indexOf("_c", prefix.length());
+        if (cAt < 0) {
+            return -1;
+        }
+        try {
+            return Integer.parseInt(name.substring(cAt + 2));
+        } catch (NumberFormatException e) {
+            return -1;
+        }
     }
 
     static void addBookmark(P paragraph, String name, long id) {

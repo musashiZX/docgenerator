@@ -18,7 +18,11 @@ import com.docgen.mutation.ModifyApplier;
 import com.docgen.mutation.MutationApplier;
 import com.docgen.mutation.MutationValidator;
 import com.docgen.mutation.NodeHashGuard;
+import com.docgen.mutation.TableStructuralApplier;
 import com.docgen.support.FixtureFactory;
+import com.docgen.recovery.CheckpointStore;
+import com.docgen.recovery.CommitStore;
+import com.docgen.recovery.DocumentWorkspace;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 
 class ProposalServiceTest {
 
@@ -43,24 +48,31 @@ class ProposalServiceTest {
     private DocumentLoader loader;
     private StructuralIndexBuilder indexBuilder;
     private ProposalService service;
+    private CheckpointStore checkpointStore;
     private Path docPath;
 
     @BeforeEach
     void setUp() throws Exception {
         loader = new DocumentLoader(
-                new AppProperties(tempDir.resolve("docs").toString(), null, null, false));
+                new AppProperties(tempDir.resolve("docs").toString(), null, null, null, false));
         indexBuilder = new StructuralIndexBuilder();
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        checkpointStore = new CheckpointStore(loader, mapper);
+        DocumentWorkspace workspace = new DocumentWorkspace(
+                loader, new CommitStore(loader, mapper), checkpointStore);
         MutationApplier applier = new MutationApplier(
                 new MutationValidator(),
                 new ModifyApplier(new BookmarkResolver()),
                 new InsertApplier(new BookmarkResolver(), new BookmarkIndexer()),
                 new DeleteApplier(new BookmarkResolver()),
+                new TableStructuralApplier(new BookmarkResolver(), new BookmarkIndexer()),
                 new NodeHashGuard(indexBuilder));
         service = new ProposalService(
                 loader, new BookmarkIndexer(), indexBuilder, applier,
-                new ProposalStore(loader, new ObjectMapper()),
+                new ProposalStore(loader, mapper),
                 new DocumentLibraryService(loader, new BookmarkIndexer(),
-                        new DocumentMetadataStore(loader, new ObjectMapper())));
+                        new DocumentMetadataStore(loader, mapper)),
+                workspace);
 
         docPath = loader.docsDirectory().resolve("work.docx");
         FixtureFactory.writeParagraphs(docPath, "Alpha", "Bravo", "Charlie");
@@ -82,8 +94,8 @@ class ProposalServiceTest {
         Proposal proposal = service.propose("work.docx",
                 batch(
                         new ModifyMutation("modify", "dg_p0", "Alpha", 0, "Alpha!"),
-                        new InsertMutation("insert", "dg_p1", "after", "paragraph", "New para", null),
-                        new DeleteMutation("delete", "dg_p2")),
+                        new InsertMutation("insert", "dg_p1", "after", "paragraph", "New para", null, null),
+                        new DeleteMutation("delete", "dg_p2", null)),
                 "manual", null, null);
 
         Map<String, BlockDiff> byId = new HashMap<>();
@@ -166,6 +178,32 @@ class ProposalServiceTest {
         assertEquals("make it pop", loaded.prompt());
         assertEquals("gpt-4o-mini", loaded.model());
         assertTrue(loaded.createdAt() != null);
+    }
+
+    @Test
+    void approveCreatesExactlyOneCheckpoint() throws Exception {
+        int before = checkpointStore.list("work.docx").size();
+        Proposal proposal = service.propose("work.docx",
+                batch(new ModifyMutation("modify", "dg_p0", "Alpha", 0, "Alpha!")),
+                "manual", null, null);
+
+        service.approve(proposal.id());
+
+        assertEquals(before + 1, checkpointStore.list("work.docx").size());
+    }
+
+    @Test
+    void checkpointSnapshotMatchesPreApproveWorkingDoc() throws Exception {
+        Proposal proposal = service.propose("work.docx",
+                batch(new ModifyMutation("modify", "dg_p0", "Alpha", 0, "Alpha!")),
+                "manual", null, null);
+        byte[] beforeApprove = java.nio.file.Files.readAllBytes(docPath);
+
+        service.approve(proposal.id());
+
+        byte[] checkpoint = checkpointStore.loadSnapshot(
+                "work.docx", checkpointStore.list("work.docx").get(0).checkpointId());
+        assertArrayEquals(beforeApprove, checkpoint);
     }
 
     private static MutationBatch batch(com.docgen.model.Mutation... mutations) {
