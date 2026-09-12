@@ -3,6 +3,7 @@ package com.docgen.mutation;
 import com.docgen.document.DocumentSession;
 import com.docgen.model.ApplyResult;
 import com.docgen.model.DeleteMutation;
+import com.docgen.model.FormatMutation;
 import com.docgen.model.InsertMutation;
 import com.docgen.model.ModifyMutation;
 import com.docgen.model.Mutation;
@@ -34,6 +35,7 @@ public class MutationApplier {
     private final InsertApplier insertApplier;
     private final DeleteApplier deleteApplier;
     private final TableStructuralApplier tableStructuralApplier;
+    private final FormatApplier formatApplier;
     private final NodeHashGuard hashGuard;
 
     public MutationApplier(
@@ -42,12 +44,14 @@ public class MutationApplier {
             InsertApplier insertApplier,
             DeleteApplier deleteApplier,
             TableStructuralApplier tableStructuralApplier,
+            FormatApplier formatApplier,
             NodeHashGuard hashGuard) {
         this.validator = validator;
         this.modifyApplier = modifyApplier;
         this.insertApplier = insertApplier;
         this.deleteApplier = deleteApplier;
         this.tableStructuralApplier = tableStructuralApplier;
+        this.formatApplier = formatApplier;
         this.hashGuard = hashGuard;
     }
 
@@ -63,20 +67,36 @@ public class MutationApplier {
 
         Set<String> targetedIds = new HashSet<>();
         Set<String> createdIds = new HashSet<>();
+        Set<String> formattedIds = new HashSet<>();
         Map<String, String> insertChainTail = new HashMap<>();
+        Map<String, String> tableRowChainTail = new HashMap<>();
         try {
             for (Mutation mutation : batch.mutations()) {
                 switch (mutation) {
+                    case FormatMutation format -> {
+                        formatApplier.apply(session.document(), format);
+                        formattedIds.add(format.targetId());
+                    }
                     case ModifyMutation modify -> {
                         modifyApplier.apply(session.document(), modify);
                         targetedIds.add(modify.targetId());
                     }
                     case InsertMutation insert -> {
                         if (insert.isTableRow()) {
-                            log.info("Applying table_row insert mutation: anchor={} position={} cells={}",
-                                    insert.anchorId(), insert.position(), insert.cells());
+                            // Consecutive "after" row inserts on the same anchor stack as
+                            // separate rows — each one after the first is redirected onto
+                            // the row the previous insert just created (mirrors the plain
+                            // paragraph chaining below).
+                            String rowChainKey = insert.anchorId() + "#after";
+                            String effectiveAnchor = "after".equals(insert.position())
+                                    && tableRowChainTail.containsKey(rowChainKey)
+                                    ? tableRowChainTail.get(rowChainKey)
+                                    : insert.anchorId();
                             List<String> newIds = tableStructuralApplier.insertRow(
-                                    session.document(), insert);
+                                    session.document(), insert, effectiveAnchor);
+                            if ("after".equals(insert.position()) && !newIds.isEmpty()) {
+                                tableRowChainTail.put(rowChainKey, newIds.getFirst());
+                            }
                             targetedIds.addAll(newIds);
                             createdIds.addAll(newIds);
                         } else if (insert.isTableColumn()) {
@@ -121,6 +141,6 @@ public class MutationApplier {
         }
 
         Set<String> changed = hashGuard.verify(session, index.documentId(), snapshot, targetedIds);
-        return new ApplyResult(batch.mutations().size(), changed, createdIds);
+        return new ApplyResult(batch.mutations().size(), changed, createdIds, formattedIds);
     }
 }

@@ -47,11 +47,22 @@ public class TableStructuralApplier {
      * @return target ids of the newly created cells (column order).
      */
     public List<String> insertRow(WordprocessingMLPackage document, InsertMutation mutation) {
-        P anchorParagraph = bookmarkResolver.resolve(document, mutation.anchorId());
+        return insertRow(document, mutation, mutation.anchorId());
+    }
+
+    /**
+     * Like {@link #insertRow} but resolves {@code effectiveAnchorId} instead of
+     * {@code mutation.anchorId()}. Used when several consecutive "after" row
+     * inserts on the same anchor must stack as separate rows — the caller
+     * redirects each one after the first onto the row just created by the
+     * previous insert (mirrors InsertApplier's paragraph chaining).
+     */
+    public List<String> insertRow(WordprocessingMLPackage document, InsertMutation mutation, String effectiveAnchorId) {
+        P anchorParagraph = bookmarkResolver.resolve(document, effectiveAnchorId);
         TableOps.CellLocation loc = TableOps.locateCell(document, anchorParagraph);
         if (loc == null) {
             throw new IllegalArgumentException(
-                    "table_row insert anchor must be a table cell: " + mutation.anchorId());
+                    "table_row insert anchor must be a table cell: " + effectiveAnchorId);
         }
 
         List<Tc> templateCells = TableOps.cellsOf(loc.row());
@@ -61,9 +72,10 @@ public class TableStructuralApplier {
         boolean dataframe = TableOps.isDataframe(loc.table());
 
         log.info(
-                "table_row insert: anchor={} position={} tableIndex={} rowIndex={} colIndex={} "
+                "table_row insert: anchor={} effectiveAnchor={} position={} tableIndex={} rowIndex={} colIndex={} "
                         + "physicalCells={} templateTexts={} rowsBefore={} gridCols={} dataframe={} cells={}",
                 mutation.anchorId(),
+                effectiveAnchorId,
                 mutation.position(),
                 loc.tableIndex(),
                 loc.rowIndex(),
@@ -83,7 +95,7 @@ public class TableStructuralApplier {
             TableOps.stripDgBookmarkPairs(paragraph);
             paragraphs.add(paragraph);
         }
-        applyRowCellTexts(clonedCells, templateTexts, mutation.cells(), mutation.anchorId());
+        applyRowCellTexts(clonedCells, templateTexts, mutation.cells(), effectiveAnchorId);
 
         int rowContentIndex = TableOps.indexOfRow(loc.table(), loc.row());
         int insertAt = "before".equals(mutation.position()) ? rowContentIndex : rowContentIndex + 1;

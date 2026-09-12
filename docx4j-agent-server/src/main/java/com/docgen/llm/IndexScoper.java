@@ -57,7 +57,18 @@ public final class IndexScoper {
         if (!tablesOnly && terms.isEmpty()) {
             return index;
         }
-        if (!tablesOnly && terms.size() <= 1 && scoped.size() < MIN_SHRINK) {
+        // Safety floor applies regardless of how many terms were quoted. A
+        // multi-edit request often quotes the NEW text for one edit (which
+        // by definition matches no block yet) alongside the OLD text for
+        // another — e.g. "change the name to 'X' and change 'Y' to 'Z'".
+        // With multiple terms this used to skip the floor entirely, so a
+        // small document could scope down to just the one block matched by
+        // the OLD-text term and silently drop the block the other edit
+        // needs (the LLM then sees an incomplete index and wrongly declines
+        // "no such block"). Requiring the floor unconditionally means small
+        // or ambiguous scopes always fall back to the full index — correctness
+        // over prompt-size savings.
+        if (!tablesOnly && scoped.size() < MIN_SHRINK) {
             return index;
         }
         if (scoped.size() >= index.blocks().size()) {

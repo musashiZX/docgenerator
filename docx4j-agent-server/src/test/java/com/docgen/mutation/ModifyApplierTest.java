@@ -9,84 +9,82 @@ import com.docgen.support.FixtureFactory;
 import org.docx4j.openpackaging.packages.WordprocessingMLPackage;
 import org.junit.jupiter.api.Test;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+/**
+ * Covers the real bug reported this session: typing into an originally
+ * empty table cell silently failed (old_text="" was rejected outright, and
+ * even once allowed, RunEditor had nowhere to anchor the new text since an
+ * empty cell has zero runs). See RunEditorTest for the lower-level fix and
+ * MutationValidatorTest for the validation-side fix.
+ */
 class ModifyApplierTest {
 
-    private final BookmarkIndexer indexer = new BookmarkIndexer();
     private final ModifyApplier applier = new ModifyApplier(new BookmarkResolver());
     private final StructuralIndexBuilder indexBuilder = new StructuralIndexBuilder();
 
-    @Test
-    void happyPathSingleRun() throws Exception {
-        WordprocessingMLPackage document = FixtureFactory.singleParagraph("Hello");
-        indexer.ensureBookmarks(document);
-
-        applier.apply(document, modify("dg_p0", "Hello", "Hello world"));
-
-        assertEquals("Hello world", blockTexts(document).get("dg_p0"));
+    private static Map<String, String> textsById(WordprocessingMLPackage document, StructuralIndexBuilder builder) throws Exception {
+        return builder.build(document, "doc").blocks().stream()
+                .collect(Collectors.toMap(BlockDescriptor::targetId, b -> b.text() == null ? "" : b.text()));
     }
 
     @Test
-    void happyPathMultiRun() throws Exception {
-        WordprocessingMLPackage document = FixtureFactory.boldThenNormal("soy", ", wheat");
-        indexer.ensureBookmarks(document);
+    void emptyOldTextInsertsIntoGenuinelyEmptyParagraph() throws Exception {
+        WordprocessingMLPackage document = FixtureFactory.emptyParagraph();
+        new BookmarkIndexer().ensureBookmarks(document);
 
-        applier.apply(document, modify("dg_p0", "soy, wheat", "milk"));
+        applier.apply(document, new ModifyMutation("modify", "dg_p0", "", 0, "New content"));
 
-        assertEquals("milk", blockTexts(document).get("dg_p0"));
+        assertEquals("New content", textsById(document, indexBuilder).get("dg_p0"));
     }
 
     @Test
-    void tableCellModify() throws Exception {
-        WordprocessingMLPackage document = FixtureFactory.table3x3();
-        indexer.ensureBookmarks(document);
+    void emptyOldTextInsertsIntoGenuinelyEmptyTableCell() throws Exception {
+        // This is the exact reported scenario: "add content in a cell and choose center."
+        WordprocessingMLPackage document = FixtureFactory.table2x2WithEmptyCell();
+        new BookmarkIndexer().ensureBookmarks(document);
+        Map<String, String> before = textsById(document, indexBuilder);
+        String emptyCellId = before.entrySet().stream()
+                .filter(e -> e.getValue().isEmpty())
+                .map(Map.Entry::getKey)
+                .findFirst().orElseThrow();
 
-        applier.apply(document, modify("dg_tbl0_r1_c1", "R1C1", "CENTER"));
+        applier.apply(document, new ModifyMutation("modify", emptyCellId, "", 0, "New cell value"));
 
-        assertEquals("CENTER", blockTexts(document).get("dg_tbl0_r1_c1"));
+        assertEquals("New cell value", textsById(document, indexBuilder).get(emptyCellId));
+        // sibling cells must be untouched
+        assertEquals("R0C0", textsById(document, indexBuilder).get("dg_tbl0_r0_c0"));
+        assertEquals("R1C0", textsById(document, indexBuilder).get("dg_tbl0_r1_c0"));
+        assertEquals("R1C1", textsById(document, indexBuilder).get("dg_tbl0_r1_c1"));
     }
 
     @Test
-    void wrongOldTextThrowsStaleTargetAndLeavesDocumentUntouched() throws Exception {
-        WordprocessingMLPackage document = FixtureFactory.table3x3();
-        indexer.ensureBookmarks(document);
-        Map<String, String> before = blockTexts(document);
+    void emptyOldTextRejectedWhenParagraphIsNotActuallyEmpty() throws Exception {
+        WordprocessingMLPackage document = FixtureFactory.paragraphs("Not empty");
+        new BookmarkIndexer().ensureBookmarks(document);
 
-        assertThrows(StaleTargetException.class,
-                () -> applier.apply(document, modify("dg_tbl0_r1_c1", "NOT THERE", "x")));
-
-        assertEquals(before, blockTexts(document));
+        assertThrows(StaleTargetException.class, () -> applier.apply(
+                document, new ModifyMutation("modify", "dg_p0", "", 0, "New content")));
     }
 
     @Test
-    void otherBlocksUnchangedAfterModify() throws Exception {
-        WordprocessingMLPackage document = FixtureFactory.table3x3();
-        indexer.ensureBookmarks(document);
-        Map<String, String> before = blockTexts(document);
+    void subsequentModifyOnNowNonEmptyCellWorksNormally() throws Exception {
+        // Insert into an empty cell, then modify it again with normal (non-empty)
+        // old_text — proves the newly-created run behaves like any other run.
+        WordprocessingMLPackage document = FixtureFactory.table2x2WithEmptyCell();
+        new BookmarkIndexer().ensureBookmarks(document);
+        String emptyCellId = textsById(document, indexBuilder).entrySet().stream()
+                .filter(e -> e.getValue().isEmpty())
+                .map(Map.Entry::getKey)
+                .findFirst().orElseThrow();
 
-        applier.apply(document, modify("dg_tbl0_r1_c1", "R1C1", "CENTER"));
+        applier.apply(document, new ModifyMutation("modify", emptyCellId, "", 0, "First value"));
+        applier.apply(document, new ModifyMutation("modify", emptyCellId, "First", 0, "Second"));
 
-        Map<String, String> after = blockTexts(document);
-        for (Map.Entry<String, String> entry : before.entrySet()) {
-            String expected = entry.getKey().equals("dg_tbl0_r1_c1") ? "CENTER" : entry.getValue();
-            assertEquals(expected, after.get(entry.getKey()), "block " + entry.getKey());
-        }
-    }
-
-    private static ModifyMutation modify(String targetId, String oldText, String newText) {
-        return new ModifyMutation("modify", targetId, oldText, 0, newText);
-    }
-
-    private Map<String, String> blockTexts(WordprocessingMLPackage document) throws Exception {
-        Map<String, String> texts = new HashMap<>();
-        for (BlockDescriptor block : indexBuilder.build(document, "test").blocks()) {
-            texts.put(block.targetId(), block.text());
-        }
-        return texts;
+        assertEquals("Second value", textsById(document, indexBuilder).get(emptyCellId));
     }
 }

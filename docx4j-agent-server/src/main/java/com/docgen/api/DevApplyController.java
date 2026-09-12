@@ -81,6 +81,7 @@ public class DevApplyController {
                 "applied_count", result.appliedCount(),
                 "changed_ids", result.changedIds(),
                 "created_ids", result.createdIds(),
+                "formatted_ids", result.formattedIds(),
                 "trace_id", traceId);
     }
 }

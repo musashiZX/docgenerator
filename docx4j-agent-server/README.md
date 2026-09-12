@@ -1,72 +1,69 @@
 # docx4j Agent Server
 
-ID-based Word document mutation service (docx4j). See [`../docs/DOCX4J_IMPLEMENTATION_STAGES.md`](../docs/DOCX4J_IMPLEMENTATION_STAGES.md).
+An AI-powered Word document editor. Describe an edit in plain English; the AI
+proposes the exact change as a reviewable diff (via docx4j, targeting stable
+per-block bookmark IDs); you approve it before anything is saved. Every
+approved edit is versioned like git (commits, auto-checkpoints, restore,
+diff), so nothing is ever a one-way door.
+
+- **Using the app?** See **[USER_GUIDE.md](USER_GUIDE.md)** — functions,
+  how-to, a prompt cookbook with real tested examples, and the version-control
+  ("word-git") walkthrough.
+- **Checking accuracy/reliability?** See **[evals/README.md](evals/README.md)**
+  — the automated eval suite, current measured success rate, cost, and every
+  real bug it has found and fixed.
 
 ## Run
 
 ```bash
+cp ../.env.example ../.env   # then fill in OPENAI_API_KEY or GEMINI_API_KEY (see USER_GUIDE.md)
 mvn spring-boot:run
 ```
 
-Then open the **test console UI**: <http://localhost:8081/>
-
-- Upload a `.docx` (or drop one into `docx4j-agent-server/docs/`)
-- Inspect the block index (`target_id`, type, style, run/char counts, text)
-- Per block row: **Edit** stages a modify; **+&#8593;/+&#8595;** stage a paragraph insert
-  before/after; **Del** stages a paragraph delete (paragraph blocks only)
-- Changed blocks flash green; validation errors and rollbacks appear in the activity log
-- Download the result to verify formatting in Word
-
-Raw API endpoints:
-
-- `GET  /api/health`
-- `GET  /api/documents` — list
-- `POST /api/documents/upload` — multipart `.docx`
-- `GET  /api/documents/{name}/index` — structural block index
-- `GET  /api/documents/{name}/download`
-
-Each block in the index JSON shows its **identity** (`target_id`, `type`, table coords) and **size** (`char_count`, `run_count`, `ordinal`).
-
-## Apply mutations (dev endpoint, temporary)
-
-`POST /api/dev/apply/{name}` with a mutation batch body. Direct apply, bypassing the
-future propose/approve workflow — will be removed in Stage 5.
-
-```bash
-curl -X POST http://localhost:8081/api/dev/apply/your-file.docx \
-  -H "Content-Type: application/json" \
-  -d '{
-        "schema_version": 1,
-        "explanation": "why",
-        "mutations": [{
-          "op": "modify",
-          "target_id": "dg_tbl0_r1_c1",
-          "old_text": "exact current text or substring",
-          "occurrence": 0,
-          "new_text": "replacement"
-        }]
-      }'
-```
-
-Responses:
-
-- `200` — `{ "status": "ok", "applied_count": n, "changed_ids": [...] }`; file saved.
-- `400` — validation failed (unknown `target_id`, duplicate target, empty/missing `old_text`,
-  `old_text` not present in the block). File untouched.
-- `409` — `old_text` matched the index but not the live document (stale). Batch rolled back.
-- `500` — hash-guard invariant violation (collateral change detected). Batch rolled back.
+Open <http://localhost:8081>. Upload a `.docx` (or drop one into `docs/`),
+then use the AI chat panel to describe an edit.
 
 ## Test
 
 ```bash
-mvn test
+mvn test                                              # backend unit/integration tests
+python evals/run.py --catalog evals/catalog-engine.json   # deterministic eval tier, free, ~5s
+python evals/run.py                                        # LLM eval tier, needs a provider key
 ```
 
-## Status
+## What's built
 
-**Stage 4 complete** (through S4.4): bookmarks + structural index (Stage 1); run-preserving
-`modify` engine (Stage 2); validator + hash-guard safety layer (Stage 3); `insert` and
-`delete` for body paragraphs — `InsertApplier` clones the anchor's `pPr` and allocates the
-next free `dg_p*` bookmark, `DeleteApplier` removes by bookmark, table cells are protected
-(Stage 4). Plus, pulled forward from Stage 7: document list/upload/download endpoints and
-the test console UI at `/`. Next: Stage 5 propose/approve workflow.
+- **Editing**: modify, insert, delete (paragraphs and table rows/columns),
+  formatting (bold/italic/underline/size/align), bulk find-and-replace.
+- **AI chat**: a conversational session that refines one proposal across
+  multiple messages, plus a concurrent batch endpoint (`POST
+  /api/proposals/batch`) for running several independent edit requests in
+  parallel instead of one after another.
+- **Version control**: commits (named milestones), automatic checkpoints
+  (one per approved edit), restore, and a block-level diff between any two
+  snapshots.
+- **Performance**: the structural index and rendered preview are cached by
+  file version — repeat views are single-digit milliseconds; only an actual
+  edit pays the real recompute cost.
+- **Reliability**: a 60-case automated eval suite across 7 real and
+  synthetic documents (see `evals/`), plus ~180 backend unit/integration
+  tests.
+
+## What's not built yet
+
+Image insert/editing, font-family changes, bulleted/numbered list-style
+toggles. See `USER_GUIDE.md` §6 for the current, maintained list.
+
+## Architecture notes
+
+- `com.docgen.mutation` — the deterministic engine: validates and applies a
+  mutation batch against a `WordprocessingMLPackage`, guarded by a
+  text-content hash check so an edit can never silently touch an unrelated
+  block.
+- `com.docgen.llm` — turns a natural-language request into a mutation batch
+  via an OpenAI-compatible chat/completions endpoint (OpenAI or Gemini).
+- `com.docgen.proposal` / `com.docgen.conversation` — the propose → review →
+  approve workflow and the chat session layer on top of it.
+- `com.docgen.recovery` — commits, checkpoints, restore, diff.
+- `com.docgen.document` — load/save, structural indexing, HTML preview
+  rendering, and the file-version cache.

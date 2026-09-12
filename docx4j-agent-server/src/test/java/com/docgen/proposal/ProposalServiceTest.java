@@ -13,6 +13,7 @@ import com.docgen.model.InsertMutation;
 import com.docgen.model.ModifyMutation;
 import com.docgen.model.MutationBatch;
 import com.docgen.mutation.DeleteApplier;
+import com.docgen.mutation.FormatApplier;
 import com.docgen.mutation.InsertApplier;
 import com.docgen.mutation.ModifyApplier;
 import com.docgen.mutation.MutationApplier;
@@ -66,6 +67,7 @@ class ProposalServiceTest {
                 new InsertApplier(new BookmarkResolver(), new BookmarkIndexer()),
                 new DeleteApplier(new BookmarkResolver()),
                 new TableStructuralApplier(new BookmarkResolver(), new BookmarkIndexer()),
+                new FormatApplier(new BookmarkResolver()),
                 new NodeHashGuard(indexBuilder));
         service = new ProposalService(
                 loader, new BookmarkIndexer(), indexBuilder, applier,
@@ -95,7 +97,7 @@ class ProposalServiceTest {
                 batch(
                         new ModifyMutation("modify", "dg_p0", "Alpha", 0, "Alpha!"),
                         new InsertMutation("insert", "dg_p1", "after", "paragraph", "New para", null, null),
-                        new DeleteMutation("delete", "dg_p2", null)),
+                        new DeleteMutation("delete", "dg_p2", null, "Charlie")),
                 "manual", null, null);
 
         Map<String, BlockDiff> byId = new HashMap<>();

@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -85,7 +86,70 @@ public class ProposalController {
                 request.message(), index, request.model(),
                 request.selectedBlocks(), request.selectedText());
         return proposalService.propose(
-                request.docName(), llm.batch(), "llm", request.message(), llm.model());
+                request.docName(), llm.batch(), "llm", request.message(), llm.model(),
+                llm.usage(), llm.costUsd());
+    }
+
+    public record BatchProposeRequest(
+            @JsonProperty("doc_name") String docName,
+            List<String> messages,
+            String model
+    ) {
+    }
+
+    /**
+     * Runs several independent edit requests concurrently (one LLM call
+     * each, in parallel) and folds whatever comes back into ONE proposal —
+     * wall-clock time is bounded by the slowest single call, not the sum of
+     * all of them, so a batch of N requests costs about as much time as one.
+     */
+    @PostMapping("/batch")
+    public Map<String, Object> proposeBatch(@RequestBody BatchProposeRequest request, HttpServletRequest http)
+            throws Exception {
+        String traceId = String.valueOf(http.getAttribute(TraceIdFilter.TRACE_ID_ATTR));
+        if (request.docName() == null || request.docName().isBlank()) {
+            throw new IllegalArgumentException("doc_name is required");
+        }
+        if (request.messages() == null || request.messages().isEmpty()) {
+            throw new IllegalArgumentException("messages must be a non-empty list");
+        }
+        log.info("[trace:{}] Batch LLM proposal for {}: {} request(s)",
+                traceId, request.docName(), request.messages().size());
+
+        long start = System.currentTimeMillis();
+        StructuralIndex index = documentIndexService.buildIndex(request.docName());
+        ComplianceClient.BatchLlmProposal batch =
+                complianceClient.proposeBatch(request.messages(), index, request.model());
+        long elapsedMs = System.currentTimeMillis() - start;
+
+        List<Map<String, Object>> itemSummaries = batch.items().stream()
+                .map(item -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("request", item.request());
+                    m.put("mutation_count", item.batch() == null ? 0 : item.batch().mutations().size());
+                    m.put("error", item.error());
+                    return m;
+                })
+                .toList();
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("items", itemSummaries);
+        response.put("elapsed_ms", elapsedMs);
+        response.put("total_usage", batch.totalUsage());
+        response.put("total_cost_usd", batch.totalCost());
+
+        if (batch.combinedBatch().mutations().isEmpty()) {
+            response.put("status", "no_mutations");
+            return response;
+        }
+
+        Proposal proposal = proposalService.propose(
+                request.docName(), batch.combinedBatch(), "llm-batch",
+                String.join(" || ", request.messages()), batch.model(),
+                batch.totalUsage(), batch.totalCost());
+        response.put("status", "ok");
+        response.put("proposal", proposal);
+        return response;
     }
 
     @GetMapping
@@ -109,6 +173,7 @@ public class ProposalController {
                 "applied_count", result.appliedCount(),
                 "changed_ids", result.changedIds(),
                 "created_ids", result.createdIds(),
+                "formatted_ids", result.formattedIds(),
                 "trace_id", traceId);
     }
 

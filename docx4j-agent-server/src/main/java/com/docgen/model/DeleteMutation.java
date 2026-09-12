@@ -11,7 +11,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 public record DeleteMutation(
         String op,
         @JsonProperty("target_id") String targetId,
-        @JsonProperty("node_type") String nodeType
+        @JsonProperty("node_type") String nodeType,
+        @JsonProperty("evidence_text") String evidenceText
 ) implements Mutation {
 
     @JsonIgnore

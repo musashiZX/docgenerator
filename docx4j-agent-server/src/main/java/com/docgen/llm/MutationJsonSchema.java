@@ -46,6 +46,7 @@ public final class MutationJsonSchema {
         anyOf.add(modifySchema(mapper));
         anyOf.add(insertSchema(mapper));
         anyOf.add(deleteSchema(mapper));
+        anyOf.add(formatSchema(mapper));
 
         required(schema, "schema_version", "explanation", "mutations");
         return schema;
@@ -112,7 +113,55 @@ public final class MutationJsonSchema {
         nodeType.putArray("enum").add("paragraph").add("table_row").add("table_column");
         nodeType.put("description",
                 "paragraph removes one body paragraph; table_row/table_column remove a whole row/column.");
-        required(schema, "op", "target_id", "node_type");
+        string(props, "evidence_text",
+                "Exact substring COPIED VERBATIM from the target block's (or, for table_row/table_column, "
+                        + "any cell in that row/column's) current text, proving this block is genuinely the one "
+                        + "the user meant. Never paraphrase or invent this — if you cannot quote real existing "
+                        + "text that matches the user's request, do not delete this block.");
+        required(schema, "op", "target_id", "node_type", "evidence_text");
+        return schema;
+    }
+
+    private static ObjectNode formatSchema(ObjectMapper mapper) {
+        ObjectNode schema = objectSchema(mapper);
+        ObjectNode props = (ObjectNode) schema.get("properties");
+        enumString(props, "op", "format");
+        string(props, "target_id", "A target_id copied EXACTLY from the provided block list.");
+
+        ObjectNode text = props.putObject("text");
+        text.putArray("type").add("string").add("null");
+        text.put("description",
+                "Exact substring COPIED VERBATIM from the block's current text to format. "
+                        + "Null formats the WHOLE block.");
+
+        ObjectNode occurrence = props.putObject("occurrence");
+        occurrence.putArray("type").add("integer").add("null");
+        occurrence.put("description", "0-based index if text appears multiple times. Usually 0 or null.");
+
+        ObjectNode bold = props.putObject("bold");
+        bold.putArray("type").add("boolean").add("null");
+        bold.put("description", "true = bold, false = remove bold, null = leave unchanged.");
+
+        ObjectNode italic = props.putObject("italic");
+        italic.putArray("type").add("boolean").add("null");
+        italic.put("description", "true = italic, false = remove italic, null = leave unchanged.");
+
+        ObjectNode underline = props.putObject("underline");
+        underline.putArray("type").add("boolean").add("null");
+        underline.put("description", "true = underline, false = remove underline, null = leave unchanged.");
+
+        ObjectNode fontSize = props.putObject("font_size");
+        fontSize.putArray("type").add("integer").add("null");
+        fontSize.put("description", "Font size in POINTS (e.g. 14). Null = leave unchanged.");
+
+        ObjectNode align = props.putObject("align");
+        align.putArray("type").add("string").add("null");
+        align.put("description",
+                "Paragraph alignment: left|center|right|justify — applies to the WHOLE paragraph "
+                        + "regardless of text/occurrence. Null = leave unchanged.");
+
+        required(schema, "op", "target_id", "text", "occurrence", "bold", "italic", "underline",
+                "font_size", "align");
         return schema;
     }
 

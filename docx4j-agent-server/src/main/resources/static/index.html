@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>docx4j Agent Console</title>
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
   <header class="topbar">
@@ -61,13 +61,39 @@
         <code>target_id</code>s) will appear here. Use <b>Edit</b> to stage a text change,
         <b>+&#8593;</b>/<b>+&#8595;</b> to insert a paragraph before/after, and <b>Del</b>
         to delete a paragraph (paragraphs only — table cells support Edit).
-        Switch to <b>Preview</b> to see the rendered document — hover any text to see its
-        <code>target_id</code>, click for actions, <b>Ctrl+click</b> to focus blocks for AI
-        (multiple allowed). Click a Blocks row to focus one block; Ctrl+click to add/remove.
+        Switch to <b>Preview</b> to edit with a real editor — click any paragraph or cell
+        to open it in a rich-text editor with its own toolbar (Bold/Italic/Underline/Size/
+        Align), edit, then <b>Save</b>. Hover the <b>&#8942;</b> button for insert/delete/
+        focus actions, <b>Ctrl+click</b> to focus blocks for AI (multiple allowed). Changed
+        blocks are marked like a diff (green = new, blue = modified) versus your last
+        commit — use <b>Commit</b>/<b>History</b> above the preview to save a milestone or
+        roll back. Click a Blocks row to focus one block; Ctrl+click to add/remove.
       </p>
       <div class="preview-wrap" id="preview-wrap" hidden>
         <div class="preview-loading" id="preview-loading">Rendering preview&#8230;</div>
         <iframe id="preview-frame" title="Document preview"></iframe>
+        <div class="block-editor-overlay" id="block-editor-overlay" hidden>
+          <div id="block-editor-mount"></div>
+          <div class="block-editor-actions">
+            <button class="btn ghost sm" id="btn-block-editor-cancel">Cancel</button>
+            <button class="btn primary sm" id="btn-block-editor-save">Save</button>
+          </div>
+        </div>
+        <div class="preview-topbar" id="preview-topbar" hidden>
+          <button type="button" class="preview-diff-summary-btn" id="preview-diff-summary"></button>
+          <div class="preview-topbar-actions">
+            <button class="btn ghost sm" id="btn-preview-commit-toggle">Commit&#8230;</button>
+            <button class="btn ghost sm" id="btn-preview-history-toggle">History</button>
+          </div>
+        </div>
+        <div class="preview-commit-box" id="preview-commit-box" hidden>
+          <input type="text" id="preview-commit-msg" placeholder="Commit message (e.g. Baseline, v1.1)" maxlength="200">
+          <button class="btn primary sm" id="btn-preview-commit-go">Commit</button>
+        </div>
+        <div class="preview-diff-panel" id="preview-diff-panel" hidden></div>
+        <div class="preview-history-drawer" id="preview-history-drawer" hidden>
+          <div id="preview-history-mount"></div>
+        </div>
         <div class="preview-menu" id="preview-menu" hidden>
           <div class="preview-menu-head"><span class="tid" id="preview-menu-id"></span></div>
           <div class="preview-menu-actions" id="preview-menu-actions"></div>
@@ -124,22 +150,39 @@
       </div>
 
       <div class="panel-head">
-        <h2>AI edit</h2>
+        <h2>AI chat</h2>
+        <div class="chat-head-actions">
+          <button class="btn ghost sm" id="btn-session-history" title="Browse and reuse every prompt you've sent for this document">Prompt history</button>
+          <button class="btn ghost sm" id="btn-session-new" title="Start fresh — no memory of this conversation">New session</button>
+        </div>
       </div>
+      <p class="hint">Each message refines the SAME proposal — keep chatting to adjust it,
+        then Approve when you're happy. <b>New session</b> starts over with zero memory of
+        this conversation (but still sees the current document). Click <b>Prompt history</b>
+        to find an earlier request and reuse or adjust it — not to be confused with the
+        document's own version <b>History</b> (Commit/Restore) above Preview.</p>
+      <div class="prompt-history-drawer" id="prompt-history-drawer" hidden>
+        <div class="panel-head-mini">Prompt history <button class="btn ghost sm" id="btn-prompt-history-close">&times;</button></div>
+        <div id="prompt-history-list"></div>
+      </div>
+      <div class="chat-transcript" id="chat-transcript">
+        <p class="hint">No messages yet in this session — describe an edit below.</p>
+      </div>
+      <div class="chat-current-proposal" id="chat-current-proposal"></div>
       <div class="ai-box">
         <textarea id="ai-prompt" placeholder="Describe the edit, e.g. &quot;Replace the Aim section with these three numbered lines: …&quot; or &quot;Change the effective date to March 1, 2025&quot;. Complex edits (delete + insert multiple lines) are supported."></textarea>
         <p class="hint ai-selection-hint" id="ai-selection-hint" hidden></p>
         <div class="ai-actions">
           <input type="text" id="ai-model" placeholder="model (default gpt-4o-mini)">
-          <button class="btn primary" id="btn-ai-propose" disabled>Propose with AI</button>
+          <button class="btn primary" id="btn-ai-propose" disabled>Send</button>
         </div>
       </div>
 
       <div class="panel-head log-head">
-        <h2>Proposals</h2>
+        <h2>Other proposals</h2>
         <button class="btn ghost sm" id="btn-refresh-proposals" title="Refresh proposals">&#8635;</button>
       </div>
-      <p class="hint" id="proposals-hint">AI or manual batches land here for review before anything is saved.</p>
+      <p class="hint" id="proposals-hint">Manual batches (below) and test-runner proposals land here — the active chat's own proposal is shown above instead.</p>
       <div id="proposal-cards"></div>
 
       <div class="panel-head log-head">
@@ -173,6 +216,7 @@
   </main>
 
   <script src="recovery-ui.js?v=1"></script>
-  <script src="app.js?v=6"></script>
+  <script src="block-editor.bundle.js?v=1"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>

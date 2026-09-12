@@ -21,13 +21,26 @@ import java.util.regex.Pattern;
 public class DocumentPreviewService {
 
     /**
-     * docx4j often emits {@code <p><a name="dg_…"/></p><span>text</span>} (bookmark
-     * paragraph closed before its text). Fold following sibling spans into the p.
-     * Must NOT swallow tables or other block elements.
+     * docx4j sometimes closes a bookmarked paragraph early — either with no
+     * content yet ({@code <p><a name="dg_…"/></p><span>text</span>}), or,
+     * for paragraphs with a formatting boundary right after the bookmark
+     * (e.g. a bold run followed by a non-bold run), after only its first
+     * run — and, in that second case, the {@code </p>} actually lands
+     * INSIDE a still-open {@code <span>}, so what immediately follows is a
+     * dangling {@code </span>} (not a fresh {@code <span>} open tag). Either
+     * way the rest of the sentence ends up as trailing siblings OUTSIDE the
+     * paragraph, so paragraph-level styling (alignment, etc.) only ever
+     * applies to that first fragment. Fold EVERYTHING up to the next real
+     * block boundary back in — not just clean span pairs — since the
+     * trailing content can include those dangling close tags. Must NOT
+     * swallow tables or other block elements: the lookaheads in both groups
+     * stop right before one rather than crossing it.
      */
+    private static final String BLOCK_BOUNDARY =
+            "<table\\b|<p\\b|<div\\b|<h[1-6]\\b|<ul\\b|<ol\\b|<hr\\b";
     private static final Pattern BOOKMARK_THEN_SPANS = Pattern.compile(
-            "<p([^>]*data-dg-id=\"dg_[^\"]+\"[^>]*)>\\s*</p>"
-                    + "((?:\\s*<span\\b[^>]*>.*?</span>)+)",
+            "<p([^>]*data-dg-id=\"dg_[^\"]+\"[^>]*)>((?:(?!</p>|" + BLOCK_BOUNDARY + ").)*?)</p>"
+                    + "((?:(?!" + BLOCK_BOUNDARY + ").)+)",
             Pattern.DOTALL);
 
     /** Move table-cell bookmarks onto the enclosing {@code <td>}. */
@@ -57,6 +70,7 @@ public class DocumentPreviewService {
 
     private final DocumentLoader documentLoader;
     private final BookmarkIndexer bookmarkIndexer;
+    private final FileVersionCache<String> cache = new FileVersionCache<>();
 
     public DocumentPreviewService(DocumentLoader documentLoader, BookmarkIndexer bookmarkIndexer) {
         this.documentLoader = documentLoader;
@@ -65,17 +79,28 @@ public class DocumentPreviewService {
 
     public String renderHtml(String docName) throws Exception {
         Path path = documentLoader.resolveDoc(docName);
-        WordprocessingMLPackage document = documentLoader.load(path);
-        bookmarkIndexer.ensureBookmarks(document);
+        // The XSLT-based HTML export is the single most expensive operation
+        // in the app (multiple seconds on a complex document) — caching it
+        // by file mtime/size means only the FIRST preview after an actual
+        // edit pays that cost; every re-view before the next edit is instant.
+        return cache.get(docName, path, () -> {
+            WordprocessingMLPackage document = documentLoader.load(path);
+            bookmarkIndexer.ensureBookmarks(document);
 
-        HTMLSettings settings = Docx4J.createHTMLSettings();
-        settings.setOpcPackage(document);
-        // Empty image dir path makes the exporter inline images as data URIs.
-        settings.setImageDirPath("");
+            HTMLSettings settings = Docx4J.createHTMLSettings();
+            settings.setOpcPackage(document);
+            // Empty image dir path makes the exporter inline images as data URIs.
+            settings.setImageDirPath("");
 
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        Docx4J.toHTML(settings, out, Docx4J.FLAG_EXPORT_PREFER_NONXSL);
-        return normalizeBookmarkHtml(out.toString(StandardCharsets.UTF_8));
+            // PREFER_NONXSL crashes (org.w3c.dom.DOMException: WRONG_DOCUMENT_ERR)
+            // on documents with mc:AlternateContent fallback content (e.g. a
+            // floating textbox-with-table from a PDF conversion) — confirmed
+            // pre-existing in real documents, unrelated to any specific edit.
+            // The XSL path doesn't share that DOM-visitor code and doesn't crash.
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            Docx4J.toHTML(settings, out, Docx4J.FLAG_EXPORT_PREFER_XSL);
+            return normalizeBookmarkHtml(out.toString(StandardCharsets.UTF_8));
+        });
     }
 
     /**
@@ -123,9 +148,17 @@ public class DocumentPreviewService {
         out = Pattern.compile("<a\\s+name=\"dg_[^\"]+\"\\s*/>").matcher(out).replaceAll("");
         out = EMPTY_NESTED_P.matcher(out).replaceAll("$1</p>");
         out = UNCLOSED_P_BEFORE_BLOCK.matcher(out).replaceAll("$1</p>$2");
-        // Fold orphan spans back into an empty bookmark paragraph (inline only).
-        out = replaceAll(BOOKMARK_THEN_SPANS, out,
-                m -> "<p" + m.group(1) + ">" + m.group(2) + "</p>");
+        // Fold orphan spans back into their bookmark paragraph (inline only).
+        // Looped to convergence: a paragraph can have more than one early
+        // close (e.g. bold run, then another formatting change) — each pass
+        // only folds the immediately-following span run, so a chain needs
+        // repeated passes.
+        String beforeFold;
+        do {
+            beforeFold = out;
+            out = replaceAll(BOOKMARK_THEN_SPANS, out,
+                    m -> "<p" + m.group(1) + ">" + m.group(2) + m.group(3) + "</p>");
+        } while (!out.equals(beforeFold));
         return out;
     }
 

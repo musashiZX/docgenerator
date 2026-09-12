@@ -8,6 +8,7 @@ import com.docgen.model.StructuralIndex;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -40,7 +41,8 @@ public final class TableRowAnchorRepair {
                 out.add(mutation);
                 continue;
             }
-            Optional<String> better = suggestAnchor(request, insert.anchorId(), rows);
+            int expectedCells = insert.cells() == null ? -1 : insert.cells().size();
+            Optional<String> better = suggestAnchor(request, insert.anchorId(), rows, expectedCells);
             if (better.isPresent() && !better.get().equals(insert.anchorId())) {
                 changed = true;
                 out.add(new InsertMutation(
@@ -87,9 +89,26 @@ public final class TableRowAnchorRepair {
         return sb.toString();
     }
 
+    /** Back-compat overload — no cell-count guard (used by tests that don't care). */
     static Optional<String> suggestAnchor(
             String request, String currentAnchor, Map<String, List<BlockDescriptor>> rows) {
+        return suggestAnchor(request, currentAnchor, rows, -1);
+    }
+
+    static Optional<String> suggestAnchor(
+            String request, String currentAnchor, Map<String, List<BlockDescriptor>> rows,
+            int expectedCellCount) {
         List<ScoredRow> scored = scoreAllRows(request, rows);
+        if (expectedCellCount > 0) {
+            // A redirect target must structurally fit the row the LLM is
+            // actually inserting (same physical column count) — otherwise a
+            // request that merely describes the new row's content using
+            // column-name-ish phrasing (e.g. "...country of origin China")
+            // can coincidentally text-match a completely unrelated 2-column
+            // label/value row elsewhere in the document and hijack the
+            // anchor onto it, producing a cells-length mismatch.
+            scored = scored.stream().filter(r -> r.cells().size() == expectedCellCount).toList();
+        }
         if (scored.isEmpty()) {
             return Optional.empty();
         }
@@ -110,19 +129,55 @@ public final class TableRowAnchorRepair {
 
     private static List<ScoredRow> scoreAllRows(String request, Map<String, List<BlockDescriptor>> rows) {
         String haystack = normalize(request);
+        Map<Integer, Integer> maxCellsPerTable = new HashMap<>();
+        // Column headers ("Country of origin", "E-number") repeat verbatim as
+        // a cell value across multiple rows/tables — once as the header
+        // label, again wherever another table names the same kind of field.
+        // A request describing a new row's content naturally echoes those
+        // field names, so a repeated cell value must never count as a
+        // "the user named this row" match — only a phrase that appears as a
+        // cell value in exactly one row anywhere in the document is a
+        // genuine, unique row identifier.
+        Map<String, Integer> cellTextFrequency = new HashMap<>();
+        for (List<BlockDescriptor> cells : rows.values()) {
+            Integer tableIndex = cells.getFirst().tableIndex();
+            if (tableIndex != null) {
+                maxCellsPerTable.merge(tableIndex, cells.size(), Math::max);
+            }
+            for (BlockDescriptor cell : cells) {
+                String text = cell.text() == null ? "" : cell.text().trim();
+                if (!text.isEmpty() && !isWeakToken(text)) {
+                    cellTextFrequency.merge(normalize(text), 1, Integer::sum);
+                }
+            }
+        }
         List<ScoredRow> scored = new ArrayList<>();
         for (Map.Entry<String, List<BlockDescriptor>> entry : rows.entrySet()) {
-            int score = scoreRowAgainstRequest(entry.getValue(), haystack);
+            List<BlockDescriptor> cells = entry.getValue();
+            Integer tableIndex = cells.getFirst().tableIndex();
+            int maxCells = tableIndex == null ? cells.size() : maxCellsPerTable.getOrDefault(tableIndex, cells.size());
+            // A lone fully-merged cell in an otherwise multi-column table is
+            // almost always the table's own title/caption row, not a
+            // clonable data row. A literal text match there (e.g. the user
+            // saying "additives declaration table" matching a table whose
+            // caption row literally reads "Additives declaration") must not
+            // steal the anchor away from the real example row — cloning a
+            // caption row can never produce a sane new data row anyway.
+            if (cells.size() == 1 && maxCells > 1) {
+                continue;
+            }
+            int score = scoreRowAgainstRequest(cells, haystack, cellTextFrequency);
             if (score > 0) {
-                scored.add(new ScoredRow(entry.getKey(), entry.getValue(), score,
-                        preferredAnchor(entry.getValue()), rowSummary(entry.getValue())));
+                scored.add(new ScoredRow(entry.getKey(), cells, score,
+                        preferredAnchor(cells), rowSummary(cells)));
             }
         }
         scored.sort(Comparator.comparingInt(ScoredRow::score).reversed());
         return scored;
     }
 
-    private static int scoreRowAgainstRequest(List<BlockDescriptor> cells, String request) {
+    private static int scoreRowAgainstRequest(
+            List<BlockDescriptor> cells, String request, Map<String, Integer> cellTextFrequency) {
         int score = 0;
         StringBuilder concat = new StringBuilder();
         for (BlockDescriptor cell : cells) {
@@ -131,7 +186,14 @@ public final class TableRowAnchorRepair {
                 continue;
             }
             String normalized = normalize(text);
-            if (normalized.length() >= 8 && request.contains(normalized)) {
+            // Single-cell matches must be a distinctive multi-word phrase
+            // that is UNIQUE across the document (see cellTextFrequency
+            // comment above), not one common word or a repeated field label.
+            // A real row label ("Is this product organic?") is long, has
+            // spaces, and appears nowhere else in the document.
+            if (normalized.length() >= 12 && normalized.contains(" ")
+                    && cellTextFrequency.getOrDefault(normalized, 0) <= 1
+                    && request.contains(normalized)) {
                 score = Math.max(score, 40 + Math.min(40, normalized.length()));
             }
             if (!concat.isEmpty()) {

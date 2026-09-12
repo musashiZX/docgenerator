@@ -26,7 +26,7 @@ class DeleteApplierTest {
         WordprocessingMLPackage document = FixtureFactory.paragraphs("Alpha", "Bravo", "Charlie");
         new BookmarkIndexer().ensureBookmarks(document);
 
-        applier.apply(document, new DeleteMutation("delete", "dg_p1", null));
+        applier.apply(document, new DeleteMutation("delete", "dg_p1", null, "evidence"));
 
         List<String> ids = new ArrayList<>();
         List<String> texts = new ArrayList<>();
@@ -45,6 +45,6 @@ class DeleteApplierTest {
         new BookmarkIndexer().ensureBookmarks(document);
 
         assertThrows(IllegalArgumentException.class,
-                () -> applier.apply(document, new DeleteMutation("delete", "dg_tbl0_r0_c0", null)));
+                () -> applier.apply(document, new DeleteMutation("delete", "dg_tbl0_r0_c0", null, "evidence")));
     }
 }

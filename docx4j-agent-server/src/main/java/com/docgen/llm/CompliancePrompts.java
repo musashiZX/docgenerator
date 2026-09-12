@@ -50,15 +50,45 @@ public final class CompliancePrompts {
             Works on merged/layout rows — removes the whole example-style row.
             9. delete table_column: node_type "table_column"; dataframe tables only; \
             target_id any cell in that column. Do not delete the last remaining column.
+            9b. EVERY delete requires evidence_text: an exact substring COPIED VERBATIM \
+            from the block(s) you are deleting (for table_row/table_column, from any \
+            cell in that row/column), proving it is genuinely the content the user \
+            described. If you cannot find a real block whose actual text matches what \
+            the user asked to remove/replace, DO NOT invent a plausible-looking target \
+            and delete it — return an empty mutations array instead. Never delete a \
+            block just because its surrounding topic seems related; the evidence_text \
+            itself must connect to the user's request. EXCEPTION: to delete a genuinely \
+            EMPTY paragraph (a blank line, the block's text is ""), set evidence_text to \
+            "" — there is nothing to quote, and this is only accepted when the block's \
+            actual current text is already empty. This exception does NOT apply to \
+            table_row/table_column deletes.
             10. Prefer minimal edits: change only what the user asked for.
+            10b. Match the formatting CONVENTION already used by sibling values — same \
+            column, same kind of field, or the immediately surrounding rows/paragraphs. \
+            If every other row in a column reads "Every 12 months" (capital E), a new \
+            value in that column must also start with a capital letter, not "every 12 \
+            months". Copy capitalization, units, and punctuation style from the nearest \
+            comparable existing value, not just the literal casing the user typed in \
+            their request.
             11. When USER FOCUSED THESE BLOCKS lists multiple target_ids, treat them as \
             the primary edit scope (but you may touch adjacent blocks if the recipe requires).
             12. Match the document's existing language unless told otherwise.
-            13. You CAN combine modify, insert, and delete in ONE batch. Multiple \
+            13. You CAN combine modify, insert, delete, and format in ONE batch. Multiple \
             deletes and multiple inserts are allowed.
+            13b. format: changes bold/italic/underline/font_size on a text span, and/or \
+            paragraph alignment (left/center/right/justify). target_id required. text is \
+            an exact verbatim substring to format (null = whole block); occurrence as in \
+            modify. bold/italic/underline are true (on) / false (off) / null (unchanged). \
+            font_size is in points, null = unchanged. align applies to the WHOLE paragraph \
+            no matter what text/occurrence say, null = unchanged. format NEVER changes text \
+            — for changing what a block says, use modify instead. Only use format when the \
+            user explicitly asks for bold/italic/underline/size/alignment.
             14. Return an empty mutations array ONLY when the request is truly \
             impossible (e.g. editing a PDF, or no matching blocks). Do NOT refuse \
-            table-row inserts on merged layout tables — clone the example row instead.
+            table-row inserts on merged layout tables — clone the example row instead. \
+            But if the user names a section/field/phrase that does NOT actually appear \
+            anywhere in DOCUMENT BLOCKS, that IS "no matching blocks" — return empty \
+            mutations rather than guessing at the nearest unrelated block.
             15. For find-and-replace (e.g. change "Food Safety" to "Food Safe"): emit \
             a modify ONLY for blocks whose text actually contains the search string. \
             Copy old_text verbatim from THAT block's text — never reuse text from a \
@@ -67,9 +97,13 @@ public final class CompliancePrompts {
             RECIPES (common patterns — use these instead of refusing)
 
             A) Replace a whole section with new multi-line content
+               - Only use this recipe if the section you are replacing genuinely \
+            EXISTS in DOCUMENT BLOCKS (you can quote real text from it). If the named \
+            section is not present, return empty mutations instead of replacing an \
+            unrelated block.
                - Identify the paragraph ids to remove (type=paragraph).
                - Add one delete per removed paragraph (each needs its own target_id, \
-            node_type "paragraph").
+            node_type "paragraph", and evidence_text quoted from that paragraph).
                - Pick the paragraph BEFORE the section (or AFTER, if clearer) as anchor.
                - Add one insert per new line, ALL with the same anchor_id and \
             position "after", listed consecutively in the batch. The engine chains \
@@ -90,10 +124,23 @@ public final class CompliancePrompts {
                - Look at TABLE ROWS below (grouped cells). Find the ONE row whose \
             text the user named (match the distinctive question / label — not a \
             different Yes/No row in another table).
+               - Do NOT confuse a table's own title/caption row (a single merged \
+            cell naming the whole table, e.g. text "Additives declaration" when the \
+            user says "the additives declaration table") with the actual example \
+            data row inside that table. The caption row cannot be cloned into a \
+            sane new row. When the user names a TABLE (not a specific existing \
+            entry), anchor on that table's last real data row instead — the one \
+            with real example values filled into each column.
                - anchor_id = any cell id from THAT row. position = before|after as asked.
                - cells = new values for the non-blank content cells of that example \
             (or one string per physical cell, using "" for spacers). text=null, style=null.
                - Prefer cloning that example row's layout over inventing paragraphs.
+               - For MULTIPLE new rows: add one table_row insert per new row, ALL with \
+            the SAME anchor_id and position "after", listed consecutively in the batch \
+            (same anchor_id repeated — do NOT try to invent an anchor for the second \
+            new row, it doesn't have a target_id yet). The engine chains them into \
+            separate stacked rows automatically, exactly like recipe A does for \
+            paragraphs. Never use "before" for a chain of new rows.
 
             F) Add a table column (dataframe / grid tables only)
                - node_type "table_column"; cells has one string per row.
@@ -102,7 +149,42 @@ public final class CompliancePrompts {
                - table_row: any cell in the row (works with merges).
                - table_column: dataframe only; any cell in the column.
 
+            CONVERSATION
+            If earlier assistant messages appear before the latest user message, those \
+            describe mutation batches YOU already proposed earlier in this same session \
+            (not yet approved). Treat the new user message as feedback refining that \
+            proposal — e.g. "also do X" means add X to what you already proposed, "no, \
+            do Y instead" means replace it — unless the new message is clearly an \
+            unrelated request. Always return the FULL batch needed to achieve the current \
+            combined intent, not just a delta.
+
             Output only the JSON object conforming to the schema.
+            """;
+
+    /**
+     * Explicit shape, appended to the system prompt only when the provider
+     * can't enforce a strict response schema (Gemini json_object mode). With
+     * OpenAI structured outputs the schema is attached to the request instead.
+     */
+    public static final String SCHEMA_HINT = """
+            Return EXACTLY this JSON shape (snake_case keys, no extra keys, no markdown fences):
+            {
+              "schema_version": 1,
+              "explanation": "one short sentence",
+              "mutations": [
+                // each element is ONE of:
+                { "op": "modify", "target_id": "dg_..", "old_text": "..", "occurrence": 0, "new_text": ".." },
+                { "op": "insert", "anchor_id": "dg_..", "position": "before|after",
+                  "node_type": "paragraph|table_row|table_column",
+                  "text": "string or null", "style": "string or null", "cells": ["..",".."] or null },
+                { "op": "delete", "target_id": "dg_..", "node_type": "paragraph|table_row|table_column",
+                  "evidence_text": "verbatim quote from the block being deleted" },
+                { "op": "format", "target_id": "dg_..", "text": "substring or null", "occurrence": 0 or null,
+                  "bold": true/false/null, "italic": true/false/null, "underline": true/false/null,
+                  "font_size": integer or null, "align": "left|center|right|justify" or null }
+              ]
+            }
+            If the request cannot be fulfilled, return {"schema_version":1,"explanation":"<why>","mutations":[]}.
             """;
 
     public static String userMessage(String request, StructuralIndex index,

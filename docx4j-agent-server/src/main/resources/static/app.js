@@ -11,7 +11,10 @@ const state = {
   mutations: [],
   view: "blocks", // "blocks" | "preview" | "history"
   previewLoadedFor: null, // doc name the iframe currently shows
-  proposals: [], // pending proposals for the current doc
+  previewDiff: null, // last live-vs-HEAD diff (drives inline git-style markup)
+  previewHistoryPanel: null, // RecoveryUI instance mounted in the Preview drawer
+  proposals: [], // pending proposals for the current doc (excludes the active chat session's own proposal)
+  session: null, // active ConversationSession for the current doc
   recoveryPanel: null,
   headCommitId: null,
   selectedBlockIds: [], // blocks focused for AI context (Ctrl+click to add/remove)
@@ -100,10 +103,14 @@ async function uploadFile(file) {
 
 /* ============ structural index ============ */
 async function openDoc(name) {
+  if (!closeBlockEditor()) return; // user has unsaved changes and chose to keep editing
   state.currentDoc = name;
   state.mutations = [];
   state.previewLoadedFor = null;
+  state.previewDiff = null;
   state.selectedBlockIds = [];
+  state.session = null;
+  $("prompt-history-drawer").hidden = true;
   updateAiSelectionHint();
   renderBatch();
   await loadDocs(); // refresh active highlight
@@ -112,8 +119,10 @@ async function openDoc(name) {
   $("btn-download").href = `/api/documents/${encodeURIComponent(name)}/download`;
   $("btn-ai-propose").disabled = false;
   await loadIndex();
+  await loadSession();
   await loadProposals();
   refreshRecoveryPanel();
+  state.previewHistoryPanel?.refresh();
   updateHistoryNavLink();
   if (state.view === "preview") await loadPreview();
 }
@@ -181,6 +190,7 @@ async function loadIndex(flashIds) {
 
 /* ============ preview ============ */
 function setView(view) {
+  if (view !== "preview" && !closeBlockEditor()) return; // unsaved changes — stay put
   state.view = view;
   hidePreviewMenu();
   $("tab-blocks").classList.toggle("active", view === "blocks");
@@ -198,9 +208,14 @@ function setView(view) {
   }
 }
 
-// Injected into the preview iframe: hover shows the block id, click reports
-// it back to the console so the matching row can be selected.
-const PREVIEW_AUGMENT = `
+// Injected into the preview iframe: the document is READ-ONLY here — no
+// contenteditable, no hand-rolled selection tracking. Clicking a block opens
+// a real editing session (TipTap, mounted in the parent page — see
+// openBlockEditor) instead of typing directly into docx4j's rendered HTML.
+// Still paints git-style diff markup and exposes the hover "more actions"
+// button (insert/delete/focus — structural batch ops).
+function buildPreviewAugment(diffMap) {
+  return `
 <style>
   table[id^="docx4j_tbl_"] {
     border-collapse: collapse;
@@ -212,40 +227,105 @@ const PREVIEW_AUGMENT = `
     padding: 2px 6px;
     vertical-align: top;
   }
-  [data-dg-id] { cursor: pointer; border-radius: 3px; transition: background 0.1s; }
-  [data-dg-id]:hover { background: #dbeafe !important; box-shadow: 0 0 0 2px #93c5fd; position: relative; }
-  td[data-dg-id]:hover, th[data-dg-id]:hover {
-    background: #dbeafe !important;
-    box-shadow: inset 0 0 0 2px #3b82f6;
-  }
-  [data-dg-id]:hover::before {
-    content: attr(data-dg-id);
+  [data-dg-id] { border-radius: 3px; transition: background 0.1s, box-shadow 0.1s; }
+  .dg-diff-added { background: #ecfdf3 !important; box-shadow: inset 3px 0 0 #16a34a; }
+  .dg-diff-modified { background: #eff6ff !important; box-shadow: inset 3px 0 0 #2563eb; }
+  .dg-editable { cursor: pointer; }
+  .dg-editable:hover { background: #eff6ff !important; box-shadow: 0 0 0 2px #bfdbfe; position: relative; }
+  .dg-action-btn {
     position: absolute;
-    top: -22px;
-    left: 0;
+    z-index: 50;
+    width: 20px;
+    height: 20px;
+    line-height: 18px;
+    text-align: center;
+    padding: 0;
     background: #1e3a8a;
     color: #fff;
-    font: 600 11px/1 "Segoe UI", sans-serif;
-    padding: 4px 8px;
-    border-radius: 4px;
-    white-space: nowrap;
-    z-index: 99;
-    pointer-events: none;
+    border: none;
+    border-radius: 5px;
+    font: 700 13px/18px "Segoe UI", sans-serif;
+    cursor: pointer;
+    display: none;
   }
+  .dg-action-btn:hover { background: #1e40af; }
 </style>
 <script>
+  var DIFF_MAP = ${JSON.stringify(diffMap || {})};
+  document.querySelectorAll("[data-dg-id]").forEach(function (el) {
+    var id = el.getAttribute("data-dg-id");
+    var kind = DIFF_MAP[id];
+    if (kind === "added") el.classList.add("dg-diff-added");
+    else if (kind === "modified") el.classList.add("dg-diff-modified");
+    if (el.querySelector("[data-dg-id]")) return;
+    el.classList.add("dg-editable");
+  });
+
+  // Plain click opens the real block editor in the parent page.
+  // Ctrl+click still toggles AI focus, matching the rest of the app.
   document.addEventListener("click", function (e) {
-    var el = e.target.closest("[data-dg-id]");
+    var el = e.target.closest("[data-dg-id].dg-editable");
+    if (!el) return;
+    if (e.ctrlKey || e.metaKey) {
+      parent.postMessage({
+        dgBlockId: el.getAttribute("data-dg-id"), x: e.clientX, y: e.clientY, ctrlKey: true,
+      }, "*");
+      return;
+    }
+    var r = el.getBoundingClientRect();
     parent.postMessage({
-      dgBlockId: el ? el.getAttribute("data-dg-id") : null,
-      x: e.clientX,
-      y: e.clientY,
-      ctrlKey: !!(e.ctrlKey || e.metaKey),
+      dgEditBlock: {
+        targetId: el.getAttribute("data-dg-id"),
+        html: el.innerHTML,
+        rect: { top: r.top, left: r.left, right: r.right, bottom: r.bottom, width: r.width, height: r.height },
+      },
+    }, "*");
+  });
+
+  var actionBtn = document.createElement("button");
+  actionBtn.type = "button";
+  actionBtn.className = "dg-action-btn";
+  actionBtn.textContent = "\\u22ee";
+  actionBtn.title = "Insert / delete / focus for AI";
+  document.body.appendChild(actionBtn);
+  var hoverTarget = null;
+  function dgPositionBtn(el) {
+    var r = el.getBoundingClientRect();
+    actionBtn.style.display = "block";
+    actionBtn.style.top = (window.scrollY + r.top - 6) + "px";
+    actionBtn.style.left = (window.scrollX + r.right - 16) + "px";
+  }
+  document.addEventListener("mouseover", function (e) {
+    var el = e.target.closest("[data-dg-id]");
+    if (!el || !el.classList.contains("dg-editable")) return;
+    hoverTarget = el;
+    dgPositionBtn(el);
+  });
+  document.addEventListener("mouseout", function (e) {
+    if (e.relatedTarget === actionBtn) return;
+    setTimeout(function () {
+      if (!actionBtn.matches(":hover") && !(hoverTarget && hoverTarget.matches(":hover"))) {
+        actionBtn.style.display = "none";
+      }
+    }, 80);
+  });
+  actionBtn.addEventListener("mousedown", function (e) { e.preventDefault(); e.stopPropagation(); });
+  actionBtn.addEventListener("click", function (e) {
+    e.stopPropagation();
+    if (!hoverTarget) return;
+    var r = hoverTarget.getBoundingClientRect();
+    parent.postMessage({
+      dgBlockId: hoverTarget.getAttribute("data-dg-id"), x: r.right, y: r.bottom, ctrlKey: false,
     }, "*");
   });
 <\/script>`;
+}
 
 async function loadPreview() {
+  // Reloading would otherwise destroy an in-progress, unsaved edit with no
+  // warning — if the user has one open and chooses to keep it, skip this
+  // reload rather than silently discarding their typing.
+  if (!closeBlockEditor()) return;
   const doc = state.currentDoc;
   hidePreviewMenu();
   $("preview-loading").style.display = "flex";
@@ -256,11 +336,19 @@ async function loadPreview() {
       throw new Error(body.error || res.statusText);
     }
     let html = await res.text();
+    await refreshPreviewDiff();
+    const diffMap = {};
+    if (state.previewDiff) {
+      for (const b of state.previewDiff.modified) diffMap[b.target_id] = "modified";
+      for (const b of state.previewDiff.added) diffMap[b.target_id] = "added";
+    }
+    const augment = buildPreviewAugment(diffMap);
     html = html.includes("</body>")
-      ? html.replace("</body>", `${PREVIEW_AUGMENT}</body>`)
-      : html + PREVIEW_AUGMENT;
+      ? html.replace("</body>", `${augment}</body>`)
+      : html + augment;
     $("preview-frame").srcdoc = html;
     state.previewLoadedFor = doc;
+    updatePreviewDiffBadge();
   } catch (e) {
     log("err", `Could not render preview: ${esc(e.message)}`);
   } finally {
@@ -268,10 +356,15 @@ async function loadPreview() {
   }
 }
 
-// Click in the preview opens a floating action menu on that block
-// (stays in the preview — mutations are staged in the composer on the right).
+// Messages from the preview iframe: dgEditBlock opens the real editor;
+// dgBlockId is the structural action menu (hover button or Ctrl+click-focus).
 window.addEventListener("message", (e) => {
-  if (!e.data || !("dgBlockId" in e.data)) return;
+  if (!e.data) return;
+  if ("dgEditBlock" in e.data) {
+    openBlockEditor(e.data.dgEditBlock);
+    return;
+  }
+  if (!("dgBlockId" in e.data)) return;
   const { dgBlockId: id, x, y, ctrlKey } = e.data;
   if (!id) {
     hidePreviewMenu();
@@ -289,6 +382,332 @@ window.addEventListener("message", (e) => {
   }
   showPreviewMenu(block, x, y);
 });
+
+/* ============ block editor overlay (real rich-text editor: TipTap) ============ */
+// A genuine editor (ProseMirror via TipTap) instead of a hand-rolled
+// contenteditable + regex toolbar — see block-editor.bundle.js (built from
+// editor-build/, npm run build). Opens over the clicked block; Save converts
+// the editor's HTML into modify/format mutations through the same tested
+// propose/approve pipeline everything else in this app uses.
+let blockEditorInstance = null;
+let blockEditorTargetId = null;
+let blockEditorOriginalText = null;
+let blockEditorDirty = false; // true once the user has typed/formatted anything, reset on save
+
+function openBlockEditor(info) {
+  if (!window.BlockEditor) {
+    log("err", "Block editor script did not load (block-editor.bundle.js) — reload the page.");
+    return;
+  }
+  if (!closeBlockEditor()) return; // user chose to keep editing the currently-open block
+  const block = state.blocks.find((b) => b.target_id === info.targetId);
+  if (!block) {
+    log("err", `<code>${esc(info.targetId)}</code> not found in the index — try Re-index.`);
+    return;
+  }
+  blockEditorTargetId = info.targetId;
+  blockEditorOriginalText = block.text || "";
+  blockEditorDirty = false;
+
+  const overlay = $("block-editor-overlay");
+  const wrap = $("preview-wrap");
+  const frameRect = $("preview-frame").getBoundingClientRect();
+  const wrapRect = wrap.getBoundingClientRect();
+  const width = Math.max(info.rect.width, 320);
+  overlay.style.width = `${width}px`;
+  overlay.hidden = false;
+
+  blockEditorInstance = window.BlockEditor.mount($("block-editor-mount"), {
+    html: info.html,
+    onChange: () => { blockEditorDirty = true; },
+  });
+  blockEditorInstance.focus();
+
+  const top = frameRect.top - wrapRect.top + info.rect.top;
+  const left = frameRect.left - wrapRect.left + info.rect.left;
+  overlay.style.left = `${Math.max(8, Math.min(left, wrap.clientWidth - width - 8))}px`;
+  overlay.style.top = `${Math.max(8, Math.min(top, wrap.clientHeight - overlay.offsetHeight - 8))}px`;
+}
+
+// Returns false (and leaves the editor open) if the user has unsaved
+// changes and chooses to keep editing — callers that can abort (opening a
+// different block, switching tabs/docs) should check this and stop.
+function closeBlockEditor() {
+  if (!blockEditorInstance) return true;
+  if (blockEditorDirty
+      && !confirm("Discard unsaved changes in this block? This cannot be undone.")) {
+    return false;
+  }
+  blockEditorInstance.destroy();
+  blockEditorInstance = null;
+  blockEditorTargetId = null;
+  blockEditorOriginalText = null;
+  blockEditorDirty = false;
+  $("block-editor-overlay").hidden = true;
+  return true;
+}
+
+// Two propose+approve round trips, not one: the server validates a whole
+// batch against the document's state AT PROPOSE TIME, not incrementally as
+// each mutation would apply — so a format mutation referencing brand-new
+// text from a modify earlier in the SAME batch fails validation even though
+// sequential application would work. Landing the modify first (and letting
+// it actually apply) before computing/sending the format mutations sidesteps
+// that entirely, using the exact same tested endpoints as everywhere else.
+async function saveBlockEditor() {
+  if (!blockEditorInstance || !blockEditorTargetId) return;
+  const targetId = blockEditorTargetId;
+  const originalText = blockEditorOriginalText;
+  const { fullText, runs, align } = htmlToRuns(blockEditorInstance.getHTML());
+
+  const btn = $("btn-block-editor-save");
+  if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+  try {
+    let lastResult = null;
+    if (fullText !== originalText) {
+      lastResult = await proposeAndApprove({
+        schema_version: 1,
+        explanation: "Block editor save (text)",
+        mutations: [{ op: "modify", target_id: targetId, old_text: originalText, occurrence: 0, new_text: fullText }],
+      });
+    }
+    const formatMutations = buildFormatMutations(targetId, fullText, runs, align);
+    if (formatMutations.length > 0) {
+      lastResult = await proposeAndApprove({
+        schema_version: 1, explanation: "Block editor save (format)", mutations: formatMutations,
+      });
+    }
+    log("ok", `Saved <code>${esc(targetId)}</code>.`);
+    blockEditorDirty = false; // already persisted — closeBlockEditor should not prompt
+    closeBlockEditor();
+    state.previewLoadedFor = null;
+    await loadIndex((lastResult && lastResult.changed_ids) || [targetId]);
+    await loadPreview();
+    state.recoveryPanel?.refresh();
+    state.previewHistoryPanel?.refresh();
+  } catch (e) {
+    log("err", `Save failed: ${esc(e.message)}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Save"; }
+  }
+}
+
+async function proposeAndApprove(batch) {
+  const res = await fetch("/api/proposals", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ doc_name: state.currentDoc, batch }),
+  });
+  const body = await res.json();
+  if (!res.ok) {
+    const detail = body.details
+      ? body.details.map((d) => `[#${d.mutation_index}] ${d.code} — ${d.message}`).join("; ")
+      : (body.message || body.error || res.statusText);
+    throw new Error(detail);
+  }
+  const approveRes = await fetch(`/api/proposals/${encodeURIComponent(body.id)}/approve`, { method: "POST" });
+  const approveBody = await approveRes.json();
+  if (!approveRes.ok) {
+    const detail = approveBody.details
+      ? approveBody.details.map((d) => `[#${d.mutation_index}] ${d.code} — ${d.message}`).join("; ")
+      : (approveBody.message || approveBody.error || approveRes.statusText);
+    throw new Error(detail);
+  }
+  return approveBody;
+}
+
+/**
+ * Walks TipTap's output HTML into {fullText, runs, align}. runs are
+ * document-order, contiguous spans merged wherever bold/italic/underline/
+ * fontSize are identical.
+ */
+function htmlToRuns(html) {
+  const container = document.createElement("div");
+  container.innerHTML = html;
+  const root = container.querySelector("p") || container;
+  const align = (root.style && root.style.textAlign) || "left";
+
+  const runs = [];
+  function walk(node, fmt) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      if (node.nodeValue) runs.push({ text: node.nodeValue, ...fmt });
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const tag = node.tagName.toLowerCase();
+    if (tag === "br") {
+      runs.push({ text: "\n", ...fmt });
+      return;
+    }
+    const next = { ...fmt };
+    if (tag === "strong" || tag === "b") next.bold = true;
+    if (tag === "em" || tag === "i") next.italic = true;
+    if (tag === "u") next.underline = true;
+    if (node.style && node.style.fontSize) next.fontSize = node.style.fontSize;
+    node.childNodes.forEach((child) => walk(child, next));
+  }
+  root.childNodes.forEach((child) =>
+    walk(child, { bold: false, italic: false, underline: false, fontSize: null }));
+
+  const merged = [];
+  for (const r of runs) {
+    const last = merged[merged.length - 1];
+    if (last && last.bold === r.bold && last.italic === r.italic
+        && last.underline === r.underline && last.fontSize === r.fontSize) {
+      last.text += r.text;
+    } else {
+      merged.push({ ...r });
+    }
+  }
+  return { fullText: merged.map((r) => r.text).join(""), runs: merged, align };
+}
+
+/**
+ * One format mutation per formatted run (occurrence computed the same way
+ * the server counts it — literal substring position in the flattened text,
+ * tracked via a running cursor so it stays correct even when a short run's
+ * text recurs elsewhere), plus one alignment format for the whole block.
+ * `fullText` must already match the block's CURRENT server-side text (i.e.
+ * any modify has already landed) — see saveBlockEditor's two-phase save.
+ */
+function buildFormatMutations(targetId, fullText, runs, align) {
+  const mutations = [];
+  let cursor = 0;
+  for (const r of runs) {
+    const hasFormatting = r.bold || r.italic || r.underline || r.fontSize;
+    if (r.text.length > 0 && (hasFormatting || /\S/.test(r.text))) {
+      let count = 0;
+      let from = 0;
+      while (true) {
+        const at = fullText.indexOf(r.text, from);
+        if (at < 0 || at >= cursor) break;
+        count++;
+        from = at + 1;
+      }
+      mutations.push({
+        op: "format", target_id: targetId, text: r.text, occurrence: count,
+        bold: r.bold, italic: r.italic, underline: r.underline,
+        font_size: r.fontSize ? parseInt(r.fontSize, 10) : null, align: null,
+      });
+    }
+    cursor += r.text.length;
+  }
+  mutations.push({
+    op: "format", target_id: targetId, text: null, occurrence: 0,
+    bold: null, italic: null, underline: null, font_size: null, align,
+  });
+  return mutations;
+}
+
+/* ============ inline git-style diff + rollback (lives in the Preview tab) ============ */
+async function refreshPreviewDiff() {
+  if (!state.currentDoc || !state.headCommitId) {
+    state.previewDiff = null;
+    return;
+  }
+  try {
+    const enc = encodeURIComponent(state.currentDoc);
+    const params = new URLSearchParams({
+      fromType: "commit", from: state.headCommitId, toType: "live", to: "current",
+    });
+    const res = await fetch(`/api/documents/${enc}/diff?${params}`);
+    state.previewDiff = res.ok ? await res.json() : null;
+  } catch {
+    state.previewDiff = null;
+  }
+}
+
+function updatePreviewDiffBadge() {
+  const bar = $("preview-topbar");
+  const summary = $("preview-diff-summary");
+  if (!bar || !summary) return;
+  const d = state.previewDiff;
+  if (!d) {
+    bar.hidden = !state.currentDoc;
+    summary.textContent = "No baseline yet — commit to start tracking changes.";
+    return;
+  }
+  bar.hidden = false;
+  const total = d.modified.length + d.added.length + d.removed.length;
+  summary.textContent = total === 0
+    ? "No changes since HEAD"
+    : `${d.modified.length} modified · ${d.added.length} added · ${d.removed.length} removed since HEAD`;
+}
+
+function renderPreviewDiffPanel(diff) {
+  if (!diff) return `<div class="recovery-empty">No baseline yet — commit to start tracking changes.</div>`;
+  const rows = (list, label, cls) => list.map((b) =>
+    `<div class="recovery-diff-row ${cls}">` +
+    `<span class="recovery-diff-badge ${cls}">${label}</span>` +
+    `<code class="tid">${esc(b.target_id)}</code>` +
+    (b.before_text != null
+      ? `<span class="recovery-diff-before">${esc(truncatePreview(b.before_text))}</span>` : "") +
+    (b.before_text != null && b.after_text != null
+      ? `<span class="recovery-diff-arrow">&#8594;</span>` : "") +
+    (b.after_text != null
+      ? `<span class="recovery-diff-after">${esc(truncatePreview(b.after_text))}</span>` : "") +
+    `</div>`
+  ).join("");
+  const total = diff.modified.length + diff.added.length + diff.removed.length;
+  if (total === 0) return `<div class="recovery-empty">No changes since HEAD.</div>`;
+  return rows(diff.modified, "modified", "modified")
+    + rows(diff.added, "added", "added")
+    + rows(diff.removed, "removed", "removed");
+}
+
+function truncatePreview(s, n = 90) {
+  if (!s) return "";
+  return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+async function commitFromPreview() {
+  const msg = $("preview-commit-msg").value.trim();
+  if (!msg) {
+    log("err", "Enter a commit message.");
+    return;
+  }
+  try {
+    const res = await fetch(`/api/documents/${encodeURIComponent(state.currentDoc)}/commits`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: msg }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || body.message || res.statusText);
+    log("ok", `Committed "${esc(msg)}" from Preview.`);
+    $("preview-commit-msg").value = "";
+    $("preview-commit-box").hidden = true;
+    updateHeadBadge(body.commit_id);
+    await loadPreview();
+    state.recoveryPanel?.refresh();
+    state.previewHistoryPanel?.refresh();
+  } catch (e) {
+    log("err", `Commit failed: ${esc(e.message)}`);
+  }
+}
+
+function mountPreviewHistory() {
+  if (!window.RecoveryUI || state.previewHistoryPanel) return;
+  const mount = $("preview-history-mount");
+  if (!mount) return;
+  state.previewHistoryPanel = RecoveryUI.mount(mount, {
+    getDocName: () => state.currentDoc,
+    log: (kind, msg) => log(kind, msg),
+    onLoaded: (data) => updateHeadBadge(data.headCommitId),
+    onRestored: async () => {
+      state.mutations = [];
+      renderBatch();
+      await loadIndex();
+      await loadProposals();
+      await loadPreview();
+      state.recoveryPanel?.refresh();
+    },
+    onCommitted: async () => {
+      state.recoveryPanel?.refresh();
+      await loadPreview();
+    },
+  });
+}
 
 function showPreviewMenu(block, x, y) {
   const menu = $("preview-menu");
@@ -633,7 +1052,8 @@ async function loadProposals() {
   try {
     const res = await fetch(`/api/proposals?doc=${encodeURIComponent(state.currentDoc)}`);
     const all = await res.json();
-    state.proposals = all.filter((p) => p.status === "PENDING");
+    const sessionProposalId = sessionCurrentProposalId(state.session);
+    state.proposals = all.filter((p) => p.status === "PENDING" && p.id !== sessionProposalId);
     renderProposals();
   } catch (e) {
     log("err", `Could not load proposals: ${esc(e.message)}`);
@@ -692,6 +1112,218 @@ function renderProposals() {
   wrap.querySelectorAll("[data-reject]").forEach((btn) => {
     btn.onclick = () => decideProposal(btn.dataset.reject, "reject");
   });
+}
+
+/* ============ AI chat session ============ */
+// "Keep reasoning with the AI": one active session per document. Each
+// message regenerates the batch considering the whole conversation and
+// supersedes the session's previous proposal, instead of creating an
+// independent one per prompt.
+function sessionCurrentProposalId(session) {
+  if (!session || !session.turns) return null;
+  for (let i = session.turns.length - 1; i >= 0; i--) {
+    const t = session.turns[i];
+    if (t.role === "assistant" && t.proposal_id) return t.proposal_id;
+  }
+  return null;
+}
+
+async function loadSession() {
+  if (!state.currentDoc) {
+    state.session = null;
+    renderSessionPanel();
+    return;
+  }
+  try {
+    const res = await fetch(`/api/documents/${encodeURIComponent(state.currentDoc)}/session`);
+    state.session = await res.json();
+  } catch (e) {
+    log("err", `Could not load AI session: ${esc(e.message)}`);
+    state.session = null;
+  }
+  await renderSessionPanel();
+}
+
+async function renderSessionPanel() {
+  const transcript = $("chat-transcript");
+  const proposalWrap = $("chat-current-proposal");
+  if (!transcript || !proposalWrap) return;
+  const session = state.session;
+  if (!session || !session.turns || session.turns.length === 0) {
+    transcript.innerHTML = `<p class="hint">No messages yet in this session — describe an edit below.</p>`;
+    proposalWrap.innerHTML = "";
+    return;
+  }
+  transcript.innerHTML = session.turns.map((t) => {
+    const who = t.role === "user" ? "You" : "AI";
+    return `<div class="chat-turn ${esc(t.role)}"><div class="chat-role">${who}</div>` +
+      `<div class="chat-msg">${esc(t.message).replace(/\n/g, "<br>")}</div></div>`;
+  }).join("");
+  transcript.scrollTop = transcript.scrollHeight;
+
+  const proposalId = sessionCurrentProposalId(session);
+  if (!proposalId) {
+    proposalWrap.innerHTML = "";
+    return;
+  }
+  try {
+    const res = await fetch(`/api/proposals/${encodeURIComponent(proposalId)}`);
+    const proposal = await res.json();
+    if (!res.ok || proposal.status !== "PENDING") {
+      proposalWrap.innerHTML = "";
+      return;
+    }
+    const diffs = (proposal.diffs || []).map((d) => {
+      const before = d.before_text != null
+        ? `<div class="diff-line before"><span>&minus;</span>${esc(d.before_text) || "<i>(empty)</i>"}</div>` : "";
+      const after = d.after_text != null
+        ? `<div class="diff-line after"><span>+</span>${esc(d.after_text) || "<i>(empty)</i>"}</div>` : "";
+      return `<div class="diff-block"><div class="diff-head"><span class="tid">${esc(d.target_id)}</span>` +
+        `<span class="op-badge ${esc(d.op)}">${esc(d.op)}</span></div>${before}${after}</div>`;
+    }).join("");
+    proposalWrap.innerHTML =
+      `<div class="proposal-card">` +
+      `<div class="card-head"><span><span class="op-badge insert">AI</span> ` +
+      `<span class="muted">current proposal — review, then Approve or keep chatting</span></span></div>` +
+      `<div class="proposal-diffs">${diffs || '<p class="hint">No block changes.</p>'}</div>` +
+      `<div class="composer-actions">` +
+      `<button class="btn primary" id="btn-session-approve">Approve &amp; save</button>` +
+      `<button class="btn ghost danger-text" id="btn-session-reject">Reject</button>` +
+      `</div></div>`;
+    $("btn-session-approve").onclick = approveSessionProposal;
+    $("btn-session-reject").onclick = rejectSessionProposal;
+  } catch (e) {
+    proposalWrap.innerHTML = "";
+  }
+}
+
+async function sendSessionMessage() {
+  const prompt = $("ai-prompt").value.trim();
+  if (!prompt) {
+    log("err", "Describe the edit first.");
+    return;
+  }
+  const selectedText = selectedTextForAi();
+  const selectedBlocks = selectedBlocksForAi();
+  const btn = $("btn-ai-propose");
+  const prevLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Thinking…";
+  try {
+    const payload = { message: prompt, model: $("ai-model").value.trim() || undefined };
+    if (selectedBlocks.length > 0) payload.selected_blocks = selectedBlocks;
+    if (selectedText) payload.selected_text = selectedText;
+    const res = await fetch(`/api/documents/${encodeURIComponent(state.currentDoc)}/session/message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      const detail = body.details
+        ? body.details.map((d) => `[#${d.mutation_index}] ${d.code} — ${d.message}`).join("; ")
+        : (body.message || body.error || res.statusText);
+      throw new Error(detail);
+    }
+    state.session = body;
+    $("ai-prompt").value = "";
+    await renderSessionPanel();
+    await loadProposals();
+    log("ok", "AI responded — review the diff above and keep refining or approve.");
+  } catch (e) {
+    log("err", `AI chat failed: ${esc(e.message)}`);
+  } finally {
+    btn.disabled = !state.currentDoc;
+    btn.textContent = prevLabel;
+  }
+}
+
+async function approveSessionProposal() {
+  try {
+    const res = await fetch(`/api/documents/${encodeURIComponent(state.currentDoc)}/session/approve`, { method: "POST" });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || body.message || res.statusText);
+    log("ok", `Session approved — ${body.applied_count} mutation(s) saved.`);
+    state.previewLoadedFor = null;
+    await loadIndex(body.changed_ids || []);
+    if (state.view === "preview") await loadPreview();
+    state.recoveryPanel?.refresh();
+    await loadSession();
+    await loadProposals();
+  } catch (e) {
+    log("err", `Could not approve: ${esc(e.message)}`);
+  }
+}
+
+async function rejectSessionProposal() {
+  try {
+    const res = await fetch(`/api/documents/${encodeURIComponent(state.currentDoc)}/session/reject`, { method: "POST" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || body.message || res.statusText);
+    }
+    log("ok", "Rejected — describe what you'd like instead.");
+    await loadSession();
+    await loadProposals();
+  } catch (e) {
+    log("err", `Could not reject: ${esc(e.message)}`);
+  }
+}
+
+async function startNewSession() {
+  if (sessionCurrentProposalId(state.session)) {
+    if (!confirm("Start a new session? The current pending proposal will be rejected "
+        + "(it stays visible in Prompt History).")) {
+      return;
+    }
+  }
+  try {
+    const res = await fetch(`/api/documents/${encodeURIComponent(state.currentDoc)}/session/new`, { method: "POST" });
+    state.session = await res.json();
+    await renderSessionPanel();
+    await loadProposals();
+    log("ok", "Started a new session — no memory of the previous conversation.");
+  } catch (e) {
+    log("err", `Could not start new session: ${esc(e.message)}`);
+  }
+}
+
+async function loadPromptHistory() {
+  const wrap = $("prompt-history-list");
+  if (!wrap || !state.currentDoc) return;
+  wrap.innerHTML = `<p class="hint">Loading…</p>`;
+  try {
+    const res = await fetch(`/api/proposals?doc=${encodeURIComponent(state.currentDoc)}`);
+    const all = await res.json();
+    const withPrompt = all
+        .filter((p) => p.prompt)
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    if (withPrompt.length === 0) {
+      wrap.innerHTML = `<p class="hint">No AI prompts yet for this document.</p>`;
+      return;
+    }
+    const badgeClass = (status) =>
+      status === "PENDING" ? "modified" : status === "APPROVED" ? "added" : "removed";
+    wrap.innerHTML = withPrompt.map((p) =>
+      `<div class="prompt-history-row">` +
+      `<span class="recovery-diff-badge ${badgeClass(p.status)}">${esc(p.status)}</span>` +
+      `<span class="prompt-history-text" title="${esc(p.prompt)}">${esc(p.prompt)}</span>` +
+      `<span class="muted">${new Date(p.created_at).toLocaleDateString()}</span>` +
+      `<button class="btn ghost sm" data-retry="${esc(p.id)}">Retry</button>` +
+      `</div>`
+    ).join("");
+    wrap.querySelectorAll("[data-retry]").forEach((btn) => {
+      btn.onclick = () => {
+        const p = withPrompt.find((x) => x.id === btn.dataset.retry);
+        if (!p) return;
+        $("ai-prompt").value = p.prompt;
+        $("prompt-history-drawer").hidden = true;
+        $("ai-prompt").focus();
+      };
+    });
+  } catch (e) {
+    wrap.innerHTML = `<p class="hint">Could not load prompt history: ${esc(e.message)}</p>`;
+  }
 }
 
 async function decideProposal(id, action) {
@@ -876,6 +1508,29 @@ $("btn-refresh-index").onclick = () => {
   loadIndex();
   if (state.view === "preview") loadPreview();
 };
+$("btn-block-editor-save").onclick = saveBlockEditor;
+$("btn-block-editor-cancel").onclick = () => closeBlockEditor();
+$("btn-preview-commit-toggle").onclick = () => {
+  const box = $("preview-commit-box");
+  box.hidden = !box.hidden;
+  if (!box.hidden) $("preview-commit-msg").focus();
+};
+$("btn-preview-commit-go").onclick = commitFromPreview;
+$("btn-preview-history-toggle").onclick = () => {
+  const drawer = $("preview-history-drawer");
+  drawer.hidden = !drawer.hidden;
+  if (!drawer.hidden) {
+    mountPreviewHistory();
+    state.previewHistoryPanel?.refresh();
+  }
+};
+$("preview-diff-summary").onclick = () => {
+  const panel = $("preview-diff-panel");
+  if (!panel) return;
+  if (!panel.hidden) { panel.hidden = true; return; }
+  panel.innerHTML = renderPreviewDiffPanel(state.previewDiff);
+  panel.hidden = false;
+};
 $("tab-blocks").onclick = () => setView("blocks");
 $("tab-preview").onclick = () => setView("preview");
 $("tab-history").onclick = () => setView("history");
@@ -886,8 +1541,15 @@ document.addEventListener("click", (e) => {
 $("btn-clear-batch").onclick = () => { state.mutations = []; renderBatch(); };
 $("btn-apply").onclick = applyBatch;
 $("btn-propose").onclick = proposeManualBatch;
-$("btn-ai-propose").onclick = () => proposeWithAi().catch(() => {});
+$("btn-ai-propose").onclick = () => sendSessionMessage().catch(() => {});
 $("btn-refresh-proposals").onclick = loadProposals;
+$("btn-session-new").onclick = startNewSession;
+$("btn-session-history").onclick = () => {
+  const drawer = $("prompt-history-drawer");
+  drawer.hidden = !drawer.hidden;
+  if (!drawer.hidden) loadPromptHistory();
+};
+$("btn-prompt-history-close").onclick = () => { $("prompt-history-drawer").hidden = true; };
 $("btn-clear-log").onclick = () => { $("log").innerHTML = ""; };
 $("btn-stage-all-comma").onclick = stageCommaForAllBlocks;
 $("btn-toggle-json").onclick = () => {

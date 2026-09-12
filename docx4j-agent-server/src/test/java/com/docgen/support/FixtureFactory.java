@@ -107,6 +107,60 @@ public final class FixtureFactory {
         table3x3().save(path.toFile());
     }
 
+    /**
+     * A single paragraph with ZERO runs — not a run with empty text, an
+     * actually empty {@code <w:p></w:p>}. This is the real shape docx4j
+     * produces for an empty table cell / paragraph (~46% of cells in a real
+     * document sampled this session); some run-editing code paths assume at
+     * least one run exists to anchor onto, which this fixture exercises.
+     */
+    public static WordprocessingMLPackage emptyParagraph() throws Exception {
+        WordprocessingMLPackage pkg = WordprocessingMLPackage.createPackage();
+        MainDocumentPart main = pkg.getMainDocumentPart();
+        ObjectFactory factory = Context.getWmlObjectFactory();
+        main.addObject(factory.createP());
+        return pkg;
+    }
+
+    public static void writeEmptyParagraph(Path path) throws Exception {
+        emptyParagraph().save(path.toFile());
+    }
+
+    /** 2x2 table where cell (0,1) is genuinely empty (zero runs); the rest have text. */
+    public static WordprocessingMLPackage table2x2WithEmptyCell() throws Exception {
+        WordprocessingMLPackage pkg = WordprocessingMLPackage.createPackage();
+        MainDocumentPart main = pkg.getMainDocumentPart();
+        ObjectFactory factory = Context.getWmlObjectFactory();
+
+        Tbl table = factory.createTbl();
+        TblGrid grid = factory.createTblGrid();
+        for (int c = 0; c < 2; c++) {
+            TblGridCol col = factory.createTblGridCol();
+            col.setW(BigInteger.valueOf(2000));
+            grid.getGridCol().add(col);
+        }
+        table.getContent().add(grid);
+
+        for (int r = 0; r < 2; r++) {
+            Tr row = factory.createTr();
+            for (int c = 0; c < 2; c++) {
+                Tc tc = factory.createTc();
+                if (r == 0 && c == 1) {
+                    tc.getContent().add(factory.createP()); // zero runs
+                } else {
+                    P paragraph = factory.createP();
+                    paragraph.getContent().add(runWithText(factory, "R" + r + "C" + c));
+                    tc.getContent().add(paragraph);
+                }
+                row.getContent().add(tc);
+            }
+            table.getContent().add(row);
+        }
+
+        main.addObject(table);
+        return pkg;
+    }
+
     /** Paragraph with a bold first run and a plain second run. */
     public static WordprocessingMLPackage boldThenNormal(String boldText, String normalText) throws Exception {
         WordprocessingMLPackage pkg = WordprocessingMLPackage.createPackage();

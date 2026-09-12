@@ -37,6 +37,12 @@
       <artifactId>docx4j-JAXB-ReferenceImpl</artifactId>
       <version>${docx4j.version}</version>
     </dependency>
+    <!-- Required by src/test/java/com/docgen/scratch/Docx2PdfBakeoffTest.java (pre-existing, not part of the app's shipped behavior). -->
+    <dependency>
+      <groupId>org.docx4j</groupId>
+      <artifactId>docx4j-export-fo</artifactId>
+      <version>${docx4j.version}</version>
+    </dependency>
 
     <dependency>
       <groupId>org.springframework.boot</groupId>
@@ -50,6 +56,16 @@
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <!-- Mockito's inline mock maker self-attaches a byte-buddy agent;
+               byte-buddy 1.15.x needs this flag to run on JDK versions newer
+               than it explicitly recognizes (this project builds on JDK 25). -->
+          <argLine>-Dnet.bytebuddy.experimental=true</argLine>
+        </configuration>
       </plugin>
     </plugins>
   </build>

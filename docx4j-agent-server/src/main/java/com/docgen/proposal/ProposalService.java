@@ -66,6 +66,12 @@ public class ProposalService {
      */
     public Proposal propose(String docName, MutationBatch batch,
                             String source, String prompt, String model) throws Exception {
+        return propose(docName, batch, source, prompt, model, null, null);
+    }
+
+    /** Overload carrying LLM cost-monitoring data (null/null for manual batches). */
+    public Proposal propose(String docName, MutationBatch batch, String source, String prompt,
+                            String model, com.docgen.llm.TokenUsage usage, Double costUsd) throws Exception {
         Path path = documentLoader.resolveDoc(docName);
         WordprocessingMLPackage document = documentLoader.load(path);
         bookmarkIndexer.ensureBookmarks(document);
@@ -92,7 +98,9 @@ public class ProposalService {
                 Instant.now(),
                 null,
                 batch,
-                diffs);
+                diffs,
+                usage,
+                costUsd);
         store.save(proposal, before);
         log.info("Proposal {} created for {} ({} mutations, source={})",
                 proposal.id(), docName, batch.mutations().size(), source);

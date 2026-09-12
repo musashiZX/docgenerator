@@ -28,12 +28,19 @@ public class DocumentIndexService {
         this.workspace = workspace;
     }
 
+    private final FileVersionCache<StructuralIndex> cache = new FileVersionCache<>();
+
     public StructuralIndex buildIndex(String docName) throws Exception {
         workspace.ensureInitialCommit(docName);
         Path path = documentLoader.resolveDoc(docName);
-        WordprocessingMLPackage document = documentLoader.load(path);
-        bookmarkIndexer.ensureBookmarks(document);
-        documentLoader.save(document, path);
-        return structuralIndexBuilder.build(document, docName);
+        // Cache hit (the common case: viewing/re-viewing between edits) skips
+        // the full disk load + JAXB unmarshal + tree walk + re-save entirely —
+        // that round trip is what made repeat /index calls cost hundreds of ms.
+        return cache.get(docName, path, () -> {
+            WordprocessingMLPackage document = documentLoader.load(path);
+            bookmarkIndexer.ensureBookmarks(document);
+            documentLoader.save(document, path);
+            return structuralIndexBuilder.build(document, docName);
+        });
     }
 }

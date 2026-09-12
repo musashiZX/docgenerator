@@ -18,6 +18,12 @@ app:
   default-model: gpt-4o-mini
   # Enables POST /api/dev/apply (direct apply bypassing proposals). Local only.
   dev-mode: true
+  # LLM provider. Temporary Gemini switch: set LLM_PROVIDER=gemini and
+  # GEMINI_API_KEY=... in the repo-root .env file.
+  llm:
+    provider: ${LLM_PROVIDER:openai}
+    gemini-api-key: ${GEMINI_API_KEY:}
+    gemini-model: ${GEMINI_MODEL:gemini-3.5-flash-lite}
 
 logging:
   level:

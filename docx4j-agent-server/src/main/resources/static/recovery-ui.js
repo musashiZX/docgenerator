@@ -140,7 +140,13 @@ window.RecoveryUI = (function () {
           html +=
             `<button type="button" class="btn ghost sm" data-restore-checkpoint="${esc(entry.id)}">Restore</button>`;
         }
+        if (!entry.isHead) {
+          html +=
+            `<button type="button" class="btn ghost sm" data-diff-toggle="${esc(entry.type)}:${esc(entry.id)}" ` +
+            `title="Show what changed between this and the current HEAD commit">Trace changes</button>`;
+        }
         html += `</div></li>`;
+        html += `<li class="recovery-diff-slot" data-diff-slot="${esc(entry.type)}:${esc(entry.id)}" hidden></li>`;
       }
       html += `</ul>`;
     }
@@ -209,6 +215,72 @@ window.RecoveryUI = (function () {
         }
       });
     });
+
+    mount.querySelectorAll("[data-diff-toggle]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const key = btn.dataset.diffToggle;
+        const sep = key.indexOf(":");
+        const type = key.slice(0, sep);
+        const id = key.slice(sep + 1);
+        const slot = mount.querySelector(`[data-diff-slot="${CSS.escape(key)}"]`);
+        if (!slot) return;
+        if (!slot.hidden) {
+          slot.hidden = true;
+          slot.innerHTML = "";
+          return;
+        }
+        slot.hidden = false;
+        slot.innerHTML = `<div class="recovery-diff-loading">Comparing against HEAD…</div>`;
+        try {
+          const headId = data.headCommitId;
+          if (!headId) throw new Error("No HEAD commit to compare against.");
+          const params = new URLSearchParams({
+            fromType: type, from: id, toType: "commit", to: headId,
+          });
+          const diff = await apiJson(`${handlers.apiBase}/documents/${enc}/diff?${params}`);
+          slot.innerHTML = renderDiff(diff);
+        } catch (e) {
+          slot.innerHTML = `<div class="recovery-diff-error">Diff failed: ${esc(e.message)}</div>`;
+        }
+      });
+    });
+  }
+
+  function renderDiff(diff) {
+    const rows = (list, label, cls) =>
+      list.map((b) =>
+        `<div class="recovery-diff-row ${cls}">` +
+        `<span class="recovery-diff-badge ${cls}">${label}</span>` +
+        `<code class="tid">${esc(b.target_id)}</code>` +
+        (b.before_text != null
+          ? `<span class="recovery-diff-before">${esc(truncate(b.before_text))}</span>`
+          : "") +
+        (b.before_text != null && b.after_text != null ? `<span class="recovery-diff-arrow">&#8594;</span>` : "") +
+        (b.after_text != null
+          ? `<span class="recovery-diff-after">${esc(truncate(b.after_text))}</span>`
+          : "") +
+        `</div>`
+      ).join("");
+
+    const total = diff.added.length + diff.removed.length + diff.modified.length;
+    if (total === 0) {
+      return `<div class="recovery-diff-panel"><div class="recovery-empty">No content differences vs HEAD (${diff.unchanged_count} block(s) unchanged).</div></div>`;
+    }
+    return (
+      `<div class="recovery-diff-panel">` +
+      `<div class="recovery-diff-summary">` +
+      `${diff.modified.length} modified · ${diff.added.length} added · ${diff.removed.length} removed · ${diff.unchanged_count} unchanged` +
+      `</div>` +
+      rows(diff.modified, "modified", "modified") +
+      rows(diff.added, "added", "added") +
+      rows(diff.removed, "removed", "removed") +
+      `</div>`
+    );
+  }
+
+  function truncate(s, n = 120) {
+    if (!s) return "";
+    return s.length > n ? s.slice(0, n) + "…" : s;
   }
 
   /**

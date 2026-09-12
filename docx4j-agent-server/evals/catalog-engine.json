@@ -1,0 +1,334 @@
+{
+  "_comment": "Engine-tier evals: hand-written mutation batches, NO LLM. Tests the applier + validator + hash guard deterministically. Free, fast, CI-able. Run: python evals/run.py --catalog evals/catalog-engine.json",
+  "api": "http://localhost:8081",
+  "cases": [
+    {
+      "id": "eng-modify-paragraph",
+      "category": "engine-modify",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "(engine) version 1.0 -> 1.1",
+      "batch": {
+        "schema_version": 1,
+        "explanation": "engine test",
+        "mutations": [
+          {
+            "op": "modify",
+            "target_id": "dg_p3",
+            "old_text": "1.0",
+            "occurrence": 0,
+            "new_text": "1.1"
+          }
+        ]
+      },
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_p3": {
+            "text_equals": "Version: 1.1"
+          }
+        },
+        "unchanged": [
+          "dg_p2",
+          "dg_p4"
+        ]
+      },
+      "op_type": "modify"
+    },
+    {
+      "id": "eng-modify-table-cell",
+      "category": "engine-modify",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "(engine) TRN-01 -> TRN-01A",
+      "batch": {
+        "schema_version": 1,
+        "explanation": "engine test",
+        "mutations": [
+          {
+            "op": "modify",
+            "target_id": "dg_tbl0_r1_c0",
+            "old_text": "TRN-01",
+            "occurrence": 0,
+            "new_text": "TRN-01A"
+          }
+        ]
+      },
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_tbl0_r1_c0": {
+            "text_equals": "TRN-01A"
+          }
+        },
+        "unchanged": [
+          "dg_tbl0_r1_c1",
+          "dg_tbl0_r2_c0"
+        ]
+      },
+      "op_type": "modify"
+    },
+    {
+      "id": "eng-format-bold-center",
+      "category": "engine-format",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "(engine) bold + center dg_p4",
+      "batch": {
+        "schema_version": 1,
+        "explanation": "engine test",
+        "mutations": [
+          {
+            "op": "format",
+            "target_id": "dg_p4",
+            "bold": true,
+            "align": "center"
+          }
+        ]
+      },
+      "expect": {
+        "outcome": "applied",
+        "format": {
+          "dg_p4": {
+            "bold": true,
+            "align": "center"
+          }
+        },
+        "blocks": {
+          "dg_p4": {
+            "text_equals": "Effective Date: January 15, 2025"
+          }
+        }
+      },
+      "op_type": "format"
+    },
+    {
+      "id": "eng-format-cell-center",
+      "category": "engine-format",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "(engine) center table cell",
+      "batch": {
+        "schema_version": 1,
+        "explanation": "engine test",
+        "mutations": [
+          {
+            "op": "format",
+            "target_id": "dg_tbl0_r1_c0",
+            "align": "center"
+          }
+        ]
+      },
+      "expect": {
+        "outcome": "applied",
+        "format": {
+          "dg_tbl0_r1_c0": {
+            "align": "center"
+          }
+        },
+        "blocks": {
+          "dg_tbl0_r1_c0": {
+            "text_equals": "TRN-01"
+          }
+        }
+      },
+      "op_type": "format"
+    },
+    {
+      "id": "eng-insert-two-paragraphs-chained",
+      "category": "engine-insert",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "(engine) two chained inserts after dg_p12",
+      "batch": {
+        "schema_version": 1,
+        "explanation": "engine test",
+        "mutations": [
+          {
+            "op": "insert",
+            "anchor_id": "dg_p12",
+            "position": "after",
+            "node_type": "paragraph",
+            "text": "ENGINE LINE ONE"
+          },
+          {
+            "op": "insert",
+            "anchor_id": "dg_p12",
+            "position": "after",
+            "node_type": "paragraph",
+            "text": "ENGINE LINE TWO"
+          }
+        ]
+      },
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "inserted_min": 2
+        },
+        "text_present": [
+          "ENGINE LINE ONE",
+          "ENGINE LINE TWO"
+        ],
+        "unchanged": [
+          "dg_p12",
+          "dg_p13"
+        ]
+      },
+      "op_type": "insert"
+    },
+    {
+      "id": "eng-delete-empty-paragraph",
+      "category": "engine-delete",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "(engine) delete the empty paragraph dg_p9",
+      "batch": {
+        "schema_version": 1,
+        "explanation": "engine test",
+        "mutations": [
+          {
+            "op": "delete",
+            "target_id": "dg_p9",
+            "node_type": "paragraph",
+            "evidence_text": ""
+          }
+        ]
+      },
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "removed_blocks": [
+            "dg_p9"
+          ]
+        }
+      },
+      "op_type": "delete"
+    },
+    {
+      "id": "eng-delete-nonempty-paragraph",
+      "category": "engine-delete",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "(engine) delete a real paragraph",
+      "batch": {
+        "schema_version": 1,
+        "explanation": "engine test",
+        "mutations": [
+          {
+            "op": "delete",
+            "target_id": "dg_p14",
+            "node_type": "paragraph",
+            "evidence_text": "Seasonal and temporary workers"
+          }
+        ]
+      },
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "removed_blocks": [
+            "dg_p14"
+          ]
+        },
+        "unchanged": [
+          "dg_p13",
+          "dg_p15"
+        ]
+      },
+      "op_type": "delete"
+    },
+    {
+      "id": "eng-table-add-two-rows-chained",
+      "category": "engine-table-row",
+      "doc": "guangdeli_eng.docx",
+      "golden": "docs/21260  GUANGDELI, Dried Beancurd Roll, 25x300g.docx",
+      "prompt": "(engine) chain two table_row inserts",
+      "batch": {
+        "schema_version": 1,
+        "explanation": "engine test",
+        "mutations": [
+          {
+            "op": "insert",
+            "anchor_id": "dg_tbl2_r2_c0",
+            "position": "after",
+            "node_type": "table_row",
+            "cells": [
+              "E224",
+              "Netherlands",
+              "Drink additives"
+            ]
+          },
+          {
+            "op": "insert",
+            "anchor_id": "dg_tbl2_r2_c0",
+            "position": "after",
+            "node_type": "table_row",
+            "cells": [
+              "E225",
+              "Spain",
+              "Snack additives"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "inserted_min": 2
+        },
+        "text_present": [
+          "E224",
+          "E225",
+          "Snack additives"
+        ]
+      },
+      "op_type": "insert"
+    },
+    {
+      "id": "eng-neg-delete-table-cell",
+      "category": "engine-negative",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "(engine) delete a table cell — must be rejected",
+      "batch": {
+        "schema_version": 1,
+        "explanation": "engine test",
+        "mutations": [
+          {
+            "op": "delete",
+            "target_id": "dg_tbl0_r1_c0",
+            "node_type": "paragraph",
+            "evidence_text": "TRN-01"
+          }
+        ]
+      },
+      "expect": {
+        "outcome": "no_change"
+      },
+      "op_type": "negative"
+    },
+    {
+      "id": "eng-neg-stale-old-text",
+      "category": "engine-negative",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "(engine) modify with wrong old_text — must be rejected",
+      "batch": {
+        "schema_version": 1,
+        "explanation": "engine test",
+        "mutations": [
+          {
+            "op": "modify",
+            "target_id": "dg_p4",
+            "old_text": "January 1, 2025",
+            "occurrence": 0,
+            "new_text": "March 1, 2025"
+          }
+        ]
+      },
+      "expect": {
+        "outcome": "no_change"
+      },
+      "op_type": "negative"
+    }
+  ]
+}

@@ -40,6 +40,28 @@ class DocumentPreviewServiceTest {
     }
 
     @Test
+    void foldsSpansIntoNonEmptyBookmarkParagraph() {
+        // Real bug: a paragraph with a formatting boundary right after the
+        // bookmark (bold "Document" then non-bold rest) got closed early by
+        // docx4j's own HTML export, leaving "Title:"/"Hygiene" as trailing
+        // siblings OUTSIDE the <p> — so paragraph-level styling (e.g. an
+        // alignment mutation) only ever affected the first word.
+        String raw = """
+                <p class="BodyText" data-dg-id="dg_p1"><span>Document</span></p>\
+                <span> </span><span>Title:</span><span> </span><span>Hygiene</span>\
+                """;
+
+        String html = DocumentPreviewService.normalizeBookmarkHtml(raw);
+
+        int pStart = html.indexOf("data-dg-id=\"dg_p1\"");
+        int closeP = html.indexOf("</p>", pStart);
+        assertTrue(closeP > 0, "paragraph must still close: " + html);
+        String body = html.substring(pStart, closeP);
+        assertTrue(body.contains("Document") && body.contains("Title:") && body.contains("Hygiene"),
+                "all fragments must be folded inside dg_p1, not left as trailing siblings: " + html);
+    }
+
+    @Test
     void closesEmptyNestedBookmarkParagraphsBeforeTable() {
         String raw = """
                 <p data-dg-id="dg_p46"><p data-dg-id="dg_p47"><p data-dg-id="dg_p48"><table id="t1"></table>\

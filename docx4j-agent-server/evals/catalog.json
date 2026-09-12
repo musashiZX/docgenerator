@@ -1,0 +1,1136 @@
+{
+  "_comment": "Eval cases for the AI doc-editor. Each case restores its golden doc, sends `prompt` through the real LLM proposal API, auto-approves (unless expect.outcome says otherwise), then grades the resulting document. See README.md.",
+  "api": "http://localhost:8081",
+  "cases": [
+    {
+      "id": "text-effective-date",
+      "category": "text-modify",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "Change the effective date from January 15, 2025 to March 1, 2025.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_p4": {
+            "text_equals": "Effective Date: March 1, 2025"
+          }
+        },
+        "unchanged": [
+          "dg_p2",
+          "dg_p3",
+          "dg_p5"
+        ]
+      },
+      "op_type": "modify"
+    },
+    {
+      "id": "text-document-number",
+      "category": "text-modify",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "Update the document number from XYZ-TRN-2025-001 to XYZ-TRN-2026-002.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_p2": {
+            "text_equals": "Document Number: XYZ-TRN-2026-002"
+          }
+        },
+        "unchanged": [
+          "dg_p3",
+          "dg_p4"
+        ]
+      },
+      "op_type": "modify"
+    },
+    {
+      "id": "text-version-bump",
+      "category": "text-modify",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "Bump the version from 1.0 to 1.1.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_p3": {
+            "text_equals": "Version: 1.1"
+          }
+        },
+        "unchanged": [
+          "dg_p2",
+          "dg_p4"
+        ]
+      },
+      "op_type": "modify"
+    },
+    {
+      "id": "text-table-cell-code",
+      "category": "text-modify-table",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "In the training modules table, change module code TRN-01 to TRN-01A.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_tbl0_r1_c0": {
+            "text_equals": "TRN-01A"
+          }
+        },
+        "unchanged": [
+          "dg_tbl0_r1_c1",
+          "dg_tbl0_r2_c0"
+        ]
+      },
+      "op_type": "modify"
+    },
+    {
+      "id": "text-table-cell-title",
+      "category": "text-modify-table",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "In row TRN-11, change the module title to \"Emergency Response and Product Recall Procedures\".",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_tbl0_r11_c1": {
+            "text_equals": "Emergency Response and Product Recall Procedures"
+          },
+          "dg_tbl0_r11_c0": {
+            "text_equals": "TRN-11"
+          }
+        }
+      },
+      "op_type": "modify"
+    },
+    {
+      "id": "text-find-replace-multi",
+      "category": "text-bulk-replace",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "Replace every occurrence of \"Food Safety\" with \"Food Safety & Quality\" in the training modules table Category column.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_tbl0_r1_c3": {
+            "text_contains": "Food Safety & Quality"
+          },
+          "dg_tbl0_r11_c3": {
+            "text_contains": "Food Safety & Quality"
+          }
+        }
+      },
+      "op_type": "modify"
+    },
+    {
+      "id": "insert-paragraph-after",
+      "category": "insert-paragraph",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "Insert a new paragraph immediately after \"This program applies to:\" with the text \"Contractors and visitors with plant access must complete induction before entry.\"",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "inserted_min": 1
+        },
+        "text_present": [
+          "Contractors and visitors with plant access must complete induction before entry."
+        ],
+        "unchanged": [
+          "dg_p12",
+          "dg_p13",
+          "dg_p14",
+          "dg_p15"
+        ]
+      },
+      "op_type": "insert"
+    },
+    {
+      "id": "delete-empty-paragraph",
+      "category": "delete-paragraph",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "Delete the empty paragraph right after the Facility line (the blank line dg_p9).",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "removed_blocks": [
+            "dg_p9"
+          ]
+        }
+      },
+      "op_type": "delete"
+    },
+    {
+      "id": "replace-bullets-with-numbered",
+      "category": "section-replace",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "Replace the three \"This program applies to\" bullet paragraphs (dg_p13, dg_p14, dg_p15) with these three numbered lines: (1) All production and warehouse staff, (2) Quality and maintenance personnel, (3) Temporary workers and approved contractors.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "removed_blocks": [
+            "dg_p13",
+            "dg_p14",
+            "dg_p15"
+          ],
+          "inserted_min": 3
+        },
+        "text_present": [
+          "All production and warehouse staff",
+          "Quality and maintenance personnel",
+          "Temporary workers and approved contractors"
+        ],
+        "unchanged": [
+          "dg_p12"
+        ]
+      },
+      "op_type": "delete"
+    },
+    {
+      "id": "format-bold-title",
+      "category": "format",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "Make the \"Effective Date: January 15, 2025\" line bold.",
+      "expect": {
+        "outcome": "applied",
+        "format": {
+          "dg_p4": {
+            "bold": true
+          }
+        },
+        "blocks": {
+          "dg_p4": {
+            "text_equals": "Effective Date: January 15, 2025"
+          }
+        }
+      },
+      "op_type": "format"
+    },
+    {
+      "id": "format-center-heading",
+      "category": "format",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "Center the \"Purpose and Scope.\" heading.",
+      "expect": {
+        "outcome": "applied",
+        "format": {
+          "dg_p10": {
+            "align": "center"
+          }
+        }
+      },
+      "op_type": "format"
+    },
+    {
+      "id": "format-cell-center",
+      "category": "format-table",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "Center the text in the module code cell for TRN-01 (dg_tbl0_r1_c0).",
+      "expect": {
+        "outcome": "applied",
+        "format": {
+          "dg_tbl0_r1_c0": {
+            "align": "center"
+          }
+        },
+        "blocks": {
+          "dg_tbl0_r1_c0": {
+            "text_equals": "TRN-01"
+          }
+        }
+      },
+      "op_type": "format"
+    },
+    {
+      "id": "table-add-two-rows-additives",
+      "category": "table-row-insert",
+      "doc": "guangdeli_eval.docx",
+      "golden": "docs/21260  GUANGDELI, Dried Beancurd Roll, 25x300g.docx",
+      "prompt": "In the additives declaration table, add 2 more rows: 1. E224 Netherlands Drink additives. 2. E225 Spain Snack additives",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "inserted_min": 2
+        },
+        "text_present": [
+          "E224",
+          "E225",
+          "Snack additives"
+        ]
+      },
+      "op_type": "insert"
+    },
+    {
+      "id": "neg-delete-table-cell",
+      "category": "negative",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "Delete the table cell dg_tbl0_r1_c0 entirely from the document.",
+      "expect": {
+        "outcome": "no_change"
+      },
+      "op_type": "negative"
+    },
+    {
+      "id": "neg-nonexistent-section",
+      "category": "negative",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "Rewrite the \"Carbon Footprint Disclosure\" section to mention Scope 3 emissions.",
+      "expect": {
+        "outcome": "no_change"
+      },
+      "op_type": "negative"
+    },
+    {
+      "id": "xyz-modify-prepared-by",
+      "category": "text-modify",
+      "op_type": "modify",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "Change the 'Prepared by' name from Anna de Vries to Sofia Bakker.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_p5": {
+            "text_equals": "Prepared by: Sofia Bakker, Quality Assurance Manager"
+          }
+        },
+        "unchanged": [
+          "dg_p6",
+          "dg_p7"
+        ]
+      }
+    },
+    {
+      "id": "xyz-modify-company-name",
+      "category": "text-modify",
+      "op_type": "modify",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "Update the company name from 'XYZ Frozen Foods B.V.' to 'XYZ Frozen Foods International B.V.'",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_p7": {
+            "text_equals": "Company: XYZ Frozen Foods International B.V."
+          }
+        },
+        "unchanged": [
+          "dg_p5",
+          "dg_p6"
+        ]
+      }
+    },
+    {
+      "id": "xyz-modify-training-frequency",
+      "category": "text-modify-table",
+      "op_type": "modify",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "In the training frequency table, change the frequency of the Product Quality Standards refresher (TRN-06) from every 6 months to every 3 months.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_tbl1_r7_c1": {
+            "text_equals": "Every 3 months"
+          }
+        },
+        "unchanged": [
+          "dg_tbl1_r6_c1",
+          "dg_tbl1_r8_c1"
+        ]
+      }
+    },
+    {
+      "id": "xyz-insert-training-type-row",
+      "category": "table-row-insert",
+      "op_type": "insert",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "In the training frequency table, add a new row: Training Type 'Contractor safety briefing', Frequency 'Before each site visit'.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "inserted_min": 2
+        },
+        "text_present": [
+          "Contractor safety briefing",
+          "Before each site visit"
+        ]
+      }
+    },
+    {
+      "id": "xyz-delete-approved-by",
+      "category": "delete-paragraph",
+      "op_type": "delete",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "Delete the 'Approved by: Peter Jansen, Plant Director' line entirely.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "removed_blocks": [
+            "dg_p6"
+          ]
+        },
+        "unchanged": [
+          "dg_p5",
+          "dg_p7"
+        ]
+      }
+    },
+    {
+      "id": "gdl-modify-net-contents",
+      "category": "text-modify-table",
+      "op_type": "modify",
+      "doc": "guangdeli_eval2.docx",
+      "golden": "docs/21260  GUANGDELI, Dried Beancurd Roll, 25x300g.docx",
+      "prompt": "Change the net contents from 300G to 250G.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_tbl0_r2_c1": {
+            "text_equals": "250G"
+          }
+        },
+        "unchanged": [
+          "dg_tbl0_r1_c1",
+          "dg_tbl0_r3_c1"
+        ]
+      }
+    },
+    {
+      "id": "gdl-modify-hs-code",
+      "category": "text-modify-table",
+      "op_type": "modify",
+      "doc": "guangdeli_eval2.docx",
+      "golden": "docs/21260  GUANGDELI, Dried Beancurd Roll, 25x300g.docx",
+      "prompt": "Update the H.S. Code from 2106909090 to 2106909099.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_tbl0_r4_c1": {
+            "text_equals": "2106909099"
+          }
+        }
+      }
+    },
+    {
+      "id": "gdl-modify-country-of-origin",
+      "category": "text-modify-table",
+      "op_type": "modify",
+      "doc": "guangdeli_eval2.docx",
+      "golden": "docs/21260  GUANGDELI, Dried Beancurd Roll, 25x300g.docx",
+      "prompt": "Change the country of origin from China to Vietnam.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_tbl0_r5_c1": {
+            "text_equals": "Vietnam"
+          }
+        }
+      }
+    },
+    {
+      "id": "gdl-modify-water-percentage",
+      "category": "text-modify-table",
+      "op_type": "modify",
+      "doc": "guangdeli_eval2.docx",
+      "golden": "docs/21260  GUANGDELI, Dried Beancurd Roll, 25x300g.docx",
+      "prompt": "In the component list table, change the WATER quantity from 8% to 7%.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_tbl1_r3_c1": {
+            "text_equals": "7%"
+          }
+        },
+        "unchanged": [
+          "dg_tbl1_r2_c1"
+        ]
+      }
+    },
+    {
+      "id": "gdl-modify-halal-institution",
+      "category": "text-modify-table",
+      "op_type": "modify",
+      "doc": "guangdeli_eval2.docx",
+      "golden": "docs/21260  GUANGDELI, Dried Beancurd Roll, 25x300g.docx",
+      "prompt": "Change the Halal certification institution from 'Shandong Halal Certification Service' to 'China Islamic Association'.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_tbl4_r3_c2": {
+            "text_equals": "If yes, institution:China Islamic Association"
+          }
+        }
+      }
+    },
+    {
+      "id": "gdl-insert-component-row",
+      "category": "table-row-insert",
+      "op_type": "insert",
+      "doc": "guangdeli_eval2.docx",
+      "golden": "docs/21260  GUANGDELI, Dried Beancurd Roll, 25x300g.docx",
+      "prompt": "In the component list table, add a new ingredient row: SALT, quantity 0.5%, country of origin China.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "inserted_min": 3
+        },
+        "text_present": [
+          "SALT",
+          "0.5%"
+        ]
+      }
+    },
+    {
+      "id": "gdl-insert-additives-row-single",
+      "category": "table-row-insert",
+      "op_type": "insert",
+      "doc": "guangdeli_eval2.docx",
+      "golden": "docs/21260  GUANGDELI, Dried Beancurd Roll, 25x300g.docx",
+      "prompt": "In the additives declaration table, add one more row: E202, Potassium sorbate, Preservative.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "inserted_min": 3
+        },
+        "text_present": [
+          "E202",
+          "Potassium sorbate",
+          "Preservative"
+        ]
+      }
+    },
+    {
+      "id": "gdl-insert-gmo-paragraph",
+      "category": "insert-paragraph",
+      "op_type": "insert",
+      "doc": "guangdeli_eval2.docx",
+      "golden": "docs/21260  GUANGDELI, Dried Beancurd Roll, 25x300g.docx",
+      "prompt": "Insert a new paragraph immediately after 'Products containing irradiated ingredients or ingredients obtained from GMOs must be labelled as such.' with the text 'This product does not contain irradiated or GMO ingredients.'",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "inserted_min": 1
+        },
+        "text_present": [
+          "This product does not contain irradiated or GMO ingredients."
+        ],
+        "unchanged": [
+          "dg_p34"
+        ]
+      }
+    },
+    {
+      "id": "gdl-delete-raw-material-note",
+      "category": "delete-paragraph",
+      "op_type": "delete",
+      "doc": "guangdeli_eval2.docx",
+      "golden": "docs/21260  GUANGDELI, Dried Beancurd Roll, 25x300g.docx",
+      "prompt": "Delete the paragraph that starts with 'Specify the raw material for vegetable oils'.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "removed_blocks": [
+            "dg_p5"
+          ]
+        },
+        "unchanged": [
+          "dg_p4",
+          "dg_p6"
+        ]
+      }
+    },
+    {
+      "id": "gdl-delete-ingredient-quality-note",
+      "category": "delete-paragraph",
+      "op_type": "delete",
+      "doc": "guangdeli_eval2.docx",
+      "golden": "docs/21260  GUANGDELI, Dried Beancurd Roll, 25x300g.docx",
+      "prompt": "Delete the paragraph that starts with 'Add important and relevant information about the ingredients'.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "removed_blocks": [
+            "dg_p6"
+          ]
+        },
+        "unchanged": [
+          "dg_p5"
+        ]
+      }
+    },
+    {
+      "id": "cv-modify-name",
+      "category": "text-modify",
+      "op_type": "modify",
+      "doc": "mydoc_eval.docx",
+      "golden": "docs/my-doc.docx",
+      "prompt": "Change the name at the top from 'Zixuan Chen' to 'Zixuan Chen, MSc'.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_p0": {
+            "text_equals": "Zixuan Chen, MSc"
+          }
+        },
+        "unchanged": [
+          "dg_p1"
+        ]
+      }
+    },
+    {
+      "id": "cv-modify-work-company",
+      "category": "text-modify",
+      "op_type": "modify",
+      "doc": "mydoc_eval.docx",
+      "golden": "docs/my-doc.docx",
+      "prompt": "Change the employer from 'ING Bank, Netherlands (2023-2026) - Software Engineer' to 'ABN AMRO, Netherlands (2023-2026) - Software Engineer'.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_p17": {
+            "text_equals": "ABN AMRO, Netherlands (2023-2026) - Software Engineer"
+          }
+        }
+      }
+    },
+    {
+      "id": "cv-modify-education-years",
+      "category": "text-modify",
+      "op_type": "modify",
+      "doc": "mydoc_eval.docx",
+      "golden": "docs/my-doc.docx",
+      "prompt": "Change the education dates from '2015-2019 Harbin Institute of Technology, Harbin, China' to '2015-2020 Harbin Institute of Technology, Harbin, China'.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_p8": {
+            "text_equals": "2015-2020 Harbin Institute of Technology, Harbin, China"
+          }
+        }
+      }
+    },
+    {
+      "id": "cv-insert-bullet-after-degree",
+      "category": "insert-paragraph",
+      "op_type": "insert",
+      "doc": "mydoc_eval.docx",
+      "golden": "docs/my-doc.docx",
+      "prompt": "Insert a new bullet point immediately after the Bachelor of Science in Mathematics line with the text: Minor in Computer Science",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "inserted_min": 1
+        },
+        "text_present": [
+          "Minor in Computer Science"
+        ],
+        "unchanged": [
+          "dg_p9",
+          "dg_p10"
+        ]
+      }
+    },
+    {
+      "id": "cv-insert-work-bullet",
+      "category": "insert-paragraph",
+      "op_type": "insert",
+      "doc": "mydoc_eval.docx",
+      "golden": "docs/my-doc.docx",
+      "prompt": "Add a new bullet point under the ING Bank work experience entry, after the existing Developed and implemented robust software solutions bullet, with the text: Led migration of core services to a microservices architecture, reducing latency by 30 percent.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "inserted_min": 1
+        },
+        "text_present": [
+          "Led migration of core services to a microservices architecture"
+        ]
+      }
+    },
+    {
+      "id": "cv-delete-tech-skills-placeholder",
+      "category": "delete-paragraph",
+      "op_type": "delete",
+      "doc": "mydoc_eval.docx",
+      "golden": "docs/my-doc.docx",
+      "prompt": "Delete the Tech skills summary placeholder line.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "removed_blocks": [
+            "dg_p6"
+          ]
+        },
+        "unchanged": [
+          "dg_p5",
+          "dg_p7"
+        ]
+      }
+    },
+    {
+      "id": "cv-delete-certificates-placeholder",
+      "category": "delete-paragraph",
+      "op_type": "delete",
+      "doc": "mydoc_eval.docx",
+      "golden": "docs/my-doc.docx",
+      "prompt": "Under the Other certificates section, delete the placeholder line below the heading.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "removed_blocks": [
+            "dg_p21"
+          ]
+        },
+        "unchanged": [
+          "dg_p20"
+        ]
+      }
+    },
+    {
+      "id": "xyz-modify-disambiguated-frequency",
+      "category": "text-modify-table",
+      "op_type": "modify",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "Change the frequency of the HACCP refresher (TRN-04) to every 9 months. There are several rows saying 'Every 12 months' in this table - only change the HACCP refresher row.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_tbl1_r6_c1": {
+            "text_equals": "Every 9 months"
+          }
+        },
+        "unchanged": [
+          "dg_tbl1_r2_c1",
+          "dg_tbl1_r3_c1",
+          "dg_tbl1_r4_c1"
+        ]
+      }
+    },
+    {
+      "id": "xyz-insert-before-heading",
+      "category": "insert-paragraph",
+      "op_type": "insert",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "Insert a new paragraph immediately BEFORE the 'Purpose and Scope' heading with the text: This document supersedes all previous training program revisions.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "inserted_min": 1
+        },
+        "text_present": [
+          "This document supersedes all previous training program revisions."
+        ],
+        "unchanged": [
+          "dg_p10",
+          "dg_p11"
+        ]
+      }
+    },
+    {
+      "id": "xyz-multi-modify-two-fields",
+      "category": "text-modify",
+      "op_type": "modify",
+      "doc": "XYZ-Training-and-Instruction-Program-version0.docx",
+      "golden": "docs/XYZ-Training-and-Instruction-Program-version0.docx",
+      "prompt": "Change the version from 1.0 to 2.0 and change the effective date to June 1, 2025.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_p3": {
+            "text_equals": "Version: 2.0"
+          },
+          "dg_p4": {
+            "text_equals": "Effective Date: June 1, 2025"
+          }
+        }
+      }
+    },
+    {
+      "id": "gdl-delete-indirect-reference",
+      "category": "delete-paragraph",
+      "op_type": "delete",
+      "doc": "guangdeli_eval3.docx",
+      "golden": "docs/21260  GUANGDELI, Dried Beancurd Roll, 25x300g.docx",
+      "prompt": "Delete the instruction paragraph that explains what to fill in for the Chemical Hazard section (it starts with 'Please fill out with the the Chemical Hazzerd').",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "removed_blocks": [
+            "dg_p59"
+          ]
+        },
+        "unchanged": [
+          "dg_p58",
+          "dg_p60"
+        ]
+      }
+    },
+    {
+      "id": "gdl-delete-gmo-paragraph-vague",
+      "category": "delete-paragraph",
+      "op_type": "delete",
+      "doc": "guangdeli_eval3.docx",
+      "golden": "docs/21260  GUANGDELI, Dried Beancurd Roll, 25x300g.docx",
+      "prompt": "Remove the paragraph about GMO and irradiated ingredient labelling requirements.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "removed_blocks": [
+            "dg_p34"
+          ]
+        },
+        "unchanged": [
+          "dg_p33"
+        ]
+      }
+    },
+    {
+      "id": "gdl-insert-additive-before-first-row",
+      "category": "table-row-insert",
+      "op_type": "insert",
+      "doc": "guangdeli_eval3.docx",
+      "golden": "docs/21260  GUANGDELI, Dried Beancurd Roll, 25x300g.docx",
+      "prompt": "In the additives declaration table, insert a new row BEFORE the E223 row: E200, Sorbic acid, Preservative.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "inserted_min": 3
+        },
+        "text_present": [
+          "E200",
+          "Sorbic acid",
+          "Preservative"
+        ]
+      }
+    },
+    {
+      "id": "gdl-modify-afg-article-number",
+      "category": "text-modify-table",
+      "op_type": "modify",
+      "doc": "guangdeli_eval3.docx",
+      "golden": "docs/21260  GUANGDELI, Dried Beancurd Roll, 25x300g.docx",
+      "prompt": "Change the AFG article number from GDL2302-8 to GDL2302-9.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_tbl0_r6_c1": {
+            "text_equals": "GDL2302-9"
+          }
+        }
+      }
+    },
+    {
+      "id": "cv-multi-modify-two-fields",
+      "category": "text-modify",
+      "op_type": "modify",
+      "doc": "mydoc_eval2.docx",
+      "golden": "docs/my-doc.docx",
+      "prompt": "Change the name to 'Zixuan Chen, MSc' and change the country line from 'China.' to 'China, Netherlands.'",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_p0": {
+            "text_equals": "Zixuan Chen, MSc"
+          },
+          "dg_p1": {
+            "text_equals": "China, Netherlands."
+          }
+        }
+      }
+    },
+    {
+      "id": "cv-delete-basic-info-placeholder",
+      "category": "delete-paragraph",
+      "op_type": "delete",
+      "doc": "mydoc_eval2.docx",
+      "golden": "docs/my-doc.docx",
+      "prompt": "Delete the 'Basic information: [add details here]' placeholder line.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "removed_blocks": [
+            "dg_p5"
+          ]
+        },
+        "unchanged": [
+          "dg_p4",
+          "dg_p6"
+        ]
+      }
+    },
+    {
+      "id": "cv-insert-profile-summary",
+      "category": "insert-paragraph",
+      "op_type": "insert",
+      "doc": "mydoc_eval2.docx",
+      "golden": "docs/my-doc.docx",
+      "prompt": "Insert a new paragraph immediately after the Profile heading with the text: Software engineer with 5+ years of experience in backend systems and distributed architectures.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "inserted_min": 1
+        },
+        "text_present": [
+          "Software engineer with 5+ years of experience in backend systems and distributed architectures."
+        ],
+        "unchanged": [
+          "dg_p4"
+        ]
+      }
+    },
+    {
+      "id": "cvl-modify-title",
+      "category": "text-modify",
+      "op_type": "modify",
+      "doc": "cv_latest_eval.docx",
+      "golden": "docs/samples/cv_latest.docx",
+      "prompt": "Change the job title line from 'Software Engineer' to 'Senior Software Engineer'. Keep the rest of that line (the middle dot and 'Backend & Distributed Systems') unchanged.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_p1": {
+            "text_equals": "Senior Software Engineer · Backend & Distributed Systems"
+          }
+        },
+        "unchanged": [
+          "dg_p0",
+          "dg_p2"
+        ]
+      }
+    },
+    {
+      "id": "cvl-modify-education-dates",
+      "category": "text-modify",
+      "op_type": "modify",
+      "doc": "cv_latest_eval.docx",
+      "golden": "docs/samples/cv_latest.docx",
+      "prompt": "In the Leiden University education line, change the end year from 2022 to 2023.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_p42": {
+            "text_contains": "2020 – 2023"
+          }
+        }
+      }
+    },
+    {
+      "id": "cvl-insert-skill-line",
+      "category": "insert-paragraph",
+      "op_type": "insert",
+      "doc": "cv_latest_eval.docx",
+      "golden": "docs/samples/cv_latest.docx",
+      "prompt": "In the TECHNICAL SKILLS section, insert a new line immediately after the Testing & correctness line with the label 'Observability' followed by: OpenTelemetry, Grafana, Prometheus.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "inserted_min": 1
+        },
+        "text_present": [
+          "OpenTelemetry",
+          "Grafana",
+          "Prometheus"
+        ]
+      }
+    },
+    {
+      "id": "cvl-delete-side-project-intro",
+      "category": "delete-paragraph",
+      "op_type": "delete",
+      "doc": "cv_latest_eval.docx",
+      "golden": "docs/samples/cv_latest.docx",
+      "prompt": "Delete the paragraph right after the 'SIDE PROJECTS' heading that starts with 'Built in own time'.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "removed_blocks": [
+            "dg_p37"
+          ]
+        },
+        "unchanged": [
+          "dg_p36",
+          "dg_p38"
+        ]
+      }
+    },
+    {
+      "id": "cv13-modify-education-dates",
+      "category": "text-modify",
+      "op_type": "modify",
+      "doc": "cv_v13_eval.docx",
+      "golden": "docs/samples/cv_v13.docx",
+      "prompt": "In the Leiden University education line, change the end date from 'May 2022' to 'June 2022'.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_p31": {
+            "text_contains": "June 2022"
+          }
+        }
+      }
+    },
+    {
+      "id": "cv13-delete-internship-bullet",
+      "category": "delete-paragraph",
+      "op_type": "delete",
+      "doc": "cv_v13_eval.docx",
+      "golden": "docs/samples/cv_v13.docx",
+      "prompt": "Delete the bullet that starts with 'Developed automated evaluation workflows for genomic prediction models'.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "removed_blocks": [
+            "dg_p34"
+          ]
+        },
+        "unchanged": [
+          "dg_p33",
+          "dg_p35"
+        ]
+      }
+    },
+    {
+      "id": "po-modify-quantity",
+      "category": "text-modify-table",
+      "op_type": "modify",
+      "doc": "it_po_eval.docx",
+      "golden": "docs/samples/it_purchase_order.docx",
+      "prompt": "In the line items table, change the quantity of the Dell PowerEdge R650 Server from 4 to 6.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_tbl0_r1_c2": {
+            "text_equals": "6"
+          }
+        },
+        "unchanged": [
+          "dg_tbl0_r2_c2",
+          "dg_tbl0_r1_c1"
+        ]
+      }
+    },
+    {
+      "id": "po-modify-approval-status",
+      "category": "text-modify-table",
+      "op_type": "modify",
+      "doc": "it_po_eval.docx",
+      "golden": "docs/samples/it_purchase_order.docx",
+      "prompt": "In the Approval table, change the Budget owner's (Elena Rossi) status from Pending to Approved. Do not change the IT Director's status, which is also Pending.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_tbl1_r2_c2": {
+            "text_equals": "Approved"
+          }
+        },
+        "unchanged": [
+          "dg_tbl1_r3_c2"
+        ]
+      }
+    },
+    {
+      "id": "po-insert-line-item-row",
+      "category": "table-row-insert",
+      "op_type": "insert",
+      "doc": "it_po_eval.docx",
+      "golden": "docs/samples/it_purchase_order.docx",
+      "prompt": "In the line items table, add a new row: Ubiquiti UniFi Access Point U6-Pro, SKU U6-PRO, quantity 8, unit price 179.00, total 1432.00.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "inserted_min": 4
+        },
+        "text_present": [
+          "Ubiquiti UniFi Access Point U6-Pro",
+          "U6-PRO"
+        ]
+      }
+    },
+    {
+      "id": "po-delete-delivery-note",
+      "category": "delete-paragraph",
+      "op_type": "delete",
+      "doc": "it_po_eval.docx",
+      "golden": "docs/samples/it_purchase_order.docx",
+      "prompt": "Delete the paragraph that starts with 'Delivery must occur within 10 business days'.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "removed_blocks": [
+            "dg_p10"
+          ]
+        },
+        "unchanged": [
+          "dg_p11"
+        ]
+      }
+    },
+    {
+      "id": "lab-modify-yield-strength",
+      "category": "text-modify-table",
+      "op_type": "modify",
+      "doc": "lab_report_eval.docx",
+      "golden": "docs/samples/lab_report.docx",
+      "prompt": "In the Tensile Test Results table, change the Yield Strength of specimen TI-002 from 875 to 878.",
+      "expect": {
+        "outcome": "applied",
+        "blocks": {
+          "dg_tbl0_r2_c1": {
+            "text_equals": "878"
+          }
+        },
+        "unchanged": [
+          "dg_tbl0_r1_c1",
+          "dg_tbl0_r3_c1"
+        ]
+      }
+    },
+    {
+      "id": "lab-insert-specimen-row",
+      "category": "table-row-insert",
+      "op_type": "insert",
+      "doc": "lab_report_eval.docx",
+      "golden": "docs/samples/lab_report.docx",
+      "prompt": "In the Tensile Test Results table, add a new specimen row: TI-004, yield strength 885, tensile strength 955, elongation 14.0.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "inserted_min": 4
+        },
+        "text_present": [
+          "TI-004"
+        ]
+      }
+    },
+    {
+      "id": "lab-delete-reviewer-line",
+      "category": "delete-paragraph",
+      "op_type": "delete",
+      "doc": "lab_report_eval.docx",
+      "golden": "docs/samples/lab_report.docx",
+      "prompt": "Delete the 'Reviewed by: Tom Hendricks, Lab Quality Manager' line.",
+      "expect": {
+        "outcome": "applied",
+        "structure": {
+          "removed_blocks": [
+            "dg_p13"
+          ]
+        },
+        "unchanged": [
+          "dg_p12"
+        ]
+      }
+    }
+  ]
+}

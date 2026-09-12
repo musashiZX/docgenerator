@@ -2,6 +2,7 @@ package com.docgen.mutation;
 
 import com.docgen.model.BlockDescriptor;
 import com.docgen.model.DeleteMutation;
+import com.docgen.model.FormatMutation;
 import com.docgen.model.InsertMutation;
 import com.docgen.model.ModifyMutation;
 import com.docgen.model.Mutation;
@@ -56,6 +57,7 @@ public class MutationValidator {
                 case DeleteMutation delete ->
                         validateDelete(i, delete, blocks, seenTargets, deletedTargets,
                                 seenTableRowOps, seenTableColOps, errors);
+                case FormatMutation format -> validateFormat(i, format, blocks, errors);
             }
         }
         return errors;
@@ -83,8 +85,8 @@ public class MutationValidator {
                     "At most one mutation per target_id per batch: " + targetId));
             return;
         }
-        if (modify.oldText() == null || modify.oldText().isEmpty()) {
-            errors.add(new ValidationError(i, "EMPTY_OLD_TEXT", "old_text must be non-empty"));
+        if (modify.oldText() == null) {
+            errors.add(new ValidationError(i, "MISSING_OLD_TEXT", "old_text is required"));
             return;
         }
         if (modify.newText() == null) {
@@ -97,12 +99,24 @@ public class MutationValidator {
                             + " — a modify must change the text (the hash guard rejects no-ops)"));
             return;
         }
+        String blockText = blocks.get(targetId).text();
+        // old_text="" is a legal special case: it asserts "this block is
+        // currently empty" (there's nothing to find/lock onto otherwise) —
+        // used to type new content into an empty paragraph/cell. occurrence
+        // is meaningless here since there's no substring search.
+        if (modify.oldText().isEmpty()) {
+            if (blockText != null && !blockText.isEmpty()) {
+                errors.add(new ValidationError(i, "OLD_TEXT_NOT_FOUND",
+                        "old_text is empty (asserts " + targetId + " is currently empty) but it actually contains: \""
+                                + abbreviate(blockText) + "\""));
+            }
+            return;
+        }
         int occurrence = modify.occurrenceOrDefault();
         if (occurrence < 0) {
             errors.add(new ValidationError(i, "BAD_OCCURRENCE", "occurrence must be >= 0"));
             return;
         }
-        String blockText = blocks.get(targetId).text();
         if (countOccurrences(blockText, modify.oldText()) <= occurrence) {
             errors.add(new ValidationError(i, "OLD_TEXT_NOT_FOUND",
                     "old_text (occurrence " + occurrence + ") not found in " + targetId
@@ -173,11 +187,25 @@ public class MutationValidator {
                     ? "row:" + tableIndex + ":" + row
                     : "col:" + tableIndex + ":" + col;
             Set<String> seen = insert.isTableRow() ? seenTableRowOps : seenTableColOps;
-            if (!seen.add(structuralKey + "#" + insert.position())) {
+            // Consecutive "after" row inserts on the SAME anchor are how you
+            // add several new rows in one batch — the applier chains them
+            // (each after the first lands on the row the previous one just
+            // created), mirroring the identical exemption for paragraph
+            // inserts below. Only rows chain this way; columns don't need it
+            // (a column insert only ever needs to happen once per batch).
+            boolean chainedAfterRowInsert = insert.isTableRow() && "after".equals(insert.position())
+                    && i > 0 && mutations.get(i - 1) instanceof InsertMutation prevInsert
+                    && prevInsert.isTableRow()
+                    && anchorId.equals(prevInsert.anchorId())
+                    && "after".equals(prevInsert.position());
+            if (!chainedAfterRowInsert && !seen.add(structuralKey + "#" + insert.position())) {
                 errors.add(new ValidationError(i, "DUPLICATE_TABLE_OP",
                         "At most one " + insert.nodeType() + " insert per "
                                 + (insert.isTableRow() ? "row" : "column")
-                                + "+position per batch for " + anchorId));
+                                + "+position per batch for " + anchorId
+                                + (insert.isTableRow()
+                                        ? " (use consecutive \"after\" inserts on the same anchor to add multiple rows)"
+                                        : "")));
             }
             if (insert.cells() != null) {
                 int physical = expectedCellCount(blocks, insert);
@@ -324,6 +352,21 @@ public class MutationValidator {
                     "target_id not in this document's index: " + targetId));
             return;
         }
+        boolean evidenceMissing = delete.evidenceText() == null || delete.evidenceText().isBlank();
+        // An empty paragraph has no text to quote as proof — verified against
+        // the block's OWN indexed text (never just trusting the caller), so
+        // this can't be used to skip evidence on a block that actually has
+        // content. Table row/column deletes always span multiple cells, some
+        // of which may be non-empty, so this exception is paragraph-only.
+        boolean targetIsVerifiablyEmptyParagraph = "paragraph".equals(block.type())
+                && !(delete.isTableRow() || delete.isTableColumn())
+                && (block.text() == null || block.text().isBlank());
+        if (evidenceMissing && !targetIsVerifiablyEmptyParagraph) {
+            errors.add(new ValidationError(i, "MISSING_EVIDENCE_TEXT",
+                    "evidence_text is required and must be a verbatim quote from the block(s) being deleted: "
+                            + targetId));
+            return;
+        }
 
         if (delete.isTableRow() || delete.isTableColumn()) {
             if (!"table_cell".equals(block.type())) {
@@ -352,6 +395,7 @@ public class MutationValidator {
                 return;
             }
             // Mark all cells in that row/column as deleted so modify/insert cannot target them.
+            boolean evidenceFound = false;
             for (BlockDescriptor candidate : blocks.values()) {
                 if (!"table_cell".equals(candidate.type())
                         || !Integer.valueOf(tableIndex).equals(candidate.tableIndex())) {
@@ -363,7 +407,17 @@ public class MutationValidator {
                 if (match) {
                     deletedTargets.add(candidate.targetId());
                     seenTargets.add(candidate.targetId());
+                    String cellText = candidate.text();
+                    if (cellText != null && cellText.contains(delete.evidenceText())) {
+                        evidenceFound = true;
+                    }
                 }
+            }
+            if (!evidenceFound) {
+                errors.add(new ValidationError(i, "EVIDENCE_TEXT_NOT_FOUND",
+                        "evidence_text \"" + abbreviate(delete.evidenceText())
+                                + "\" was not found in any cell of the " + (delete.isTableRow() ? "row" : "column")
+                                + " being deleted (" + targetId + "). Refusing to delete unrelated content."));
             }
             return;
         }
@@ -385,7 +439,77 @@ public class MutationValidator {
                     "At most one mutation per target_id per batch: " + targetId));
             return;
         }
+        if (evidenceMissing) {
+            // Reaching here without erroring already proved the block is
+            // genuinely empty (targetIsVerifiablyEmptyParagraph) — nothing to
+            // match against, and nothing to accidentally delete unrelated
+            // content from.
+            deletedTargets.add(targetId);
+            return;
+        }
+        String blockText = block.text();
+        if (blockText == null || !blockText.contains(delete.evidenceText())) {
+            errors.add(new ValidationError(i, "EVIDENCE_TEXT_NOT_FOUND",
+                    "evidence_text \"" + abbreviate(delete.evidenceText()) + "\" not found in " + targetId
+                            + ". Actual block text: \"" + abbreviate(blockText) + "\". "
+                            + "Refusing to delete unrelated content."));
+            return;
+        }
         deletedTargets.add(targetId);
+    }
+
+    private static void validateFormat(
+            int i,
+            FormatMutation format,
+            Map<String, BlockDescriptor> blocks,
+            List<ValidationError> errors) {
+
+        String targetId = format.targetId();
+        if (targetId == null || targetId.isBlank()) {
+            errors.add(new ValidationError(i, "MISSING_TARGET", "target_id is required"));
+            return;
+        }
+        BlockDescriptor block = blocks.get(targetId);
+        if (block == null) {
+            errors.add(new ValidationError(i, "UNKNOWN_TARGET",
+                    "target_id not in this document's index: " + targetId));
+            return;
+        }
+        if (!format.hasRunFormatting() && !format.hasAlignment()) {
+            errors.add(new ValidationError(i, "EMPTY_FORMAT",
+                    "format mutation must set at least one of bold/italic/underline/font_size/align"));
+            return;
+        }
+        if (format.hasAlignment()) {
+            String a = format.align().toLowerCase();
+            if (!a.equals("left") && !a.equals("center") && !a.equals("centre")
+                    && !a.equals("right") && !a.equals("justify") && !a.equals("both")) {
+                errors.add(new ValidationError(i, "BAD_ALIGN",
+                        "align must be left|center|right|justify, got: " + format.align()));
+                return;
+            }
+        }
+        if (format.hasRunFormatting()) {
+            if (format.fontSize() != null && (format.fontSize() < 1 || format.fontSize() > 400)) {
+                errors.add(new ValidationError(i, "BAD_FONT_SIZE",
+                        "font_size must be between 1 and 400 points, got: " + format.fontSize()));
+                return;
+            }
+            int occurrence = format.occurrenceOrDefault();
+            if (occurrence < 0) {
+                errors.add(new ValidationError(i, "BAD_OCCURRENCE", "occurrence must be >= 0"));
+                return;
+            }
+            if (format.text() != null && !format.text().isEmpty()) {
+                String blockText = block.text();
+                if (countOccurrences(blockText, format.text()) <= occurrence) {
+                    errors.add(new ValidationError(i, "TEXT_NOT_FOUND",
+                            "text (occurrence " + occurrence + ") not found in " + targetId
+                                    + ": \"" + abbreviate(format.text()) + "\""
+                                    + ". Actual block text: \"" + abbreviate(blockText) + "\""));
+                }
+            }
+        }
     }
 
     private static int countOccurrences(String haystack, String needle) {

@@ -34,6 +34,7 @@ class MutationApplierTest {
             new InsertApplier(new BookmarkResolver(), new BookmarkIndexer()),
             new DeleteApplier(new BookmarkResolver()),
             new TableStructuralApplier(new BookmarkResolver(), new BookmarkIndexer()),
+            new FormatApplier(new BookmarkResolver()),
             new NodeHashGuard(indexBuilder));
 
     private DocumentSession session;
@@ -107,7 +108,7 @@ class MutationApplierTest {
         MutationBatch batch = batch(
                 new ModifyMutation("modify", "dg_p0", "Alpha", 0, "Alpha!"),
                 new InsertMutation("insert", "dg_p1", "after", "paragraph", "Inserted", null, null),
-                new DeleteMutation("delete", "dg_p2", null));
+                new DeleteMutation("delete", "dg_p2", null, "Charlie"));
 
         ApplyResult result = applier.apply(paragraphSession, batch, paragraphIndex);
 
@@ -134,7 +135,7 @@ class MutationApplierTest {
         // Second mutation passes validation shape-wise but fails at apply time:
         // stale index claims dg_p1 exists, then we delete it out from under the batch.
         new DeleteApplier(new BookmarkResolver()).apply(paragraphSession.document(),
-                new DeleteMutation("delete", "dg_p1", null));
+                new DeleteMutation("delete", "dg_p1", null, "evidence"));
 
         MutationBatch batch = batch(
                 new ModifyMutation("modify", "dg_p0", "Alpha", 0, "Alpha!"),
@@ -158,8 +159,8 @@ class MutationApplierTest {
         StructuralIndex paragraphIndex = indexBuilder.build(document, "chain.docx");
 
         MutationBatch batch = batch(
-                new DeleteMutation("delete", "dg_p1", null),
-                new DeleteMutation("delete", "dg_p2", null),
+                new DeleteMutation("delete", "dg_p1", null, "Remove1"),
+                new DeleteMutation("delete", "dg_p2", null, "Remove2"),
                 new InsertMutation("insert", "dg_p0", "after", "paragraph", "New A", null, null),
                 new InsertMutation("insert", "dg_p0", "after", "paragraph", "New B", null, null),
                 new InsertMutation("insert", "dg_p0", "after", "paragraph", "New C", null, null));

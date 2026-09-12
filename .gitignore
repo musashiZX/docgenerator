@@ -10,4 +10,16 @@ logs/
 *.docx
 *.pdf
 !docx4j-agent-server/src/test/resources/**/*.docx
+# Synthetic eval sample docs (no personal data) — keep tracked so the eval
+# suite runs on a fresh checkout. The real-CV samples stay excluded by the
+# blanket *.docx rule above: they were copied in from someone's actual
+# personal documents for one-off local testing and were never meant to be
+# shared in this repo.
+!docs/samples/*.docx
+docs/samples/cv_*.docx
+
+# Session/meeting notes and local tool config — not part of the product.
+Discussion.txt
+.claude/
+openAi_key.txt
 

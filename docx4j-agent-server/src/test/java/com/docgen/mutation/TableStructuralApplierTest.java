@@ -36,6 +36,7 @@ class TableStructuralApplierTest {
             new InsertApplier(resolver, indexer),
             new DeleteApplier(resolver),
             tableApplier,
+            new FormatApplier(resolver),
             new NodeHashGuard(indexBuilder));
 
     private DocumentSession session;
@@ -67,6 +68,35 @@ class TableStructuralApplierTest {
     }
 
     @Test
+    void twoConsecutiveAfterRowInsertsOnSameAnchorStackAsSeparateRows() throws Exception {
+        // Reproduces the reported bug: "add 2 more rows" to a table, one
+        // batch with two table_row inserts on the SAME anchor+position —
+        // previously rejected outright as DUPLICATE_TABLE_OP; now the
+        // engine chains them like it already does for paragraph inserts.
+        MutationBatch batch = new MutationBatch(1, "add two rows", List.of(
+                new InsertMutation("insert", "dg_tbl0_r2_c0", "after", "table_row",
+                        null, null, List.of("E224", "Netherlands", "Drink additives")),
+                new InsertMutation("insert", "dg_tbl0_r2_c0", "after", "table_row",
+                        null, null, List.of("E225", "Spain", "Snack additives"))));
+
+        ApplyResult result = applier.apply(session, batch, index);
+
+        assertEquals(6, result.createdIds().size(), "two new rows of 3 cells each");
+        Map<String, String> texts = cellTexts();
+        assertEquals(15, texts.size(), "3x3 + 2 rows = 15 cells");
+
+        // First new row lands immediately after the anchor (row 2 -> row 3).
+        assertEquals("E224", texts.get("dg_tbl0_r3_c0"));
+        assertEquals("Netherlands", texts.get("dg_tbl0_r3_c1"));
+        assertEquals("Drink additives", texts.get("dg_tbl0_r3_c2"));
+        // Second new row stacks after the FIRST new row, not before it.
+        assertEquals("E225", texts.get("dg_tbl0_r4_c0"));
+        assertEquals("Spain", texts.get("dg_tbl0_r4_c1"));
+        assertEquals("Snack additives", texts.get("dg_tbl0_r4_c2"));
+        assertEquals("R2C0", texts.get("dg_tbl0_r2_c0"), "anchor row itself unchanged");
+    }
+
+    @Test
     void insertColumnAfterAddsCellsPerRow() throws Exception {
         MutationBatch batch = new MutationBatch(1, "add col", List.of(
                 new InsertMutation("insert", "dg_tbl0_r0_c1", "after", "table_column",
@@ -86,7 +116,7 @@ class TableStructuralApplierTest {
     @Test
     void deleteRowRemovesAllCellsInRow() throws Exception {
         MutationBatch batch = new MutationBatch(1, "drop row", List.of(
-                new DeleteMutation("delete", "dg_tbl0_r1_c1", "table_row")));
+                new DeleteMutation("delete", "dg_tbl0_r1_c1", "table_row", "R1C1")));
 
         ApplyResult result = applier.apply(session, batch, index);
 
@@ -103,7 +133,7 @@ class TableStructuralApplierTest {
     @Test
     void deleteColumnRemovesAllCellsInColumn() throws Exception {
         MutationBatch batch = new MutationBatch(1, "drop col", List.of(
-                new DeleteMutation("delete", "dg_tbl0_r0_c1", "table_column")));
+                new DeleteMutation("delete", "dg_tbl0_r0_c1", "table_column", "R0C1")));
 
         ApplyResult result = applier.apply(session, batch, index);
 

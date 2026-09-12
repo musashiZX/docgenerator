@@ -40,14 +40,15 @@ class MutationJsonSchemaTest {
     }
 
     @Test
-    void mutationItemsCoverAllThreeOps() {
+    void mutationItemsCoverAllFourOps() {
         JsonNode anyOf = MutationJsonSchema.batchSchema(mapper)
                 .get("properties").get("mutations").get("items").get("anyOf");
 
-        assertEquals(3, anyOf.size());
+        assertEquals(4, anyOf.size());
         assertEquals("modify", opOf(anyOf.get(0)));
         assertEquals("insert", opOf(anyOf.get(1)));
         assertEquals("delete", opOf(anyOf.get(2)));
+        assertEquals("format", opOf(anyOf.get(3)));
 
         // Strict mode: every property must be required, no extras allowed.
         for (JsonNode variant : anyOf) {

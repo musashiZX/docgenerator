@@ -1,11 +1,15 @@
 package com.docgen.api;
 
+import com.docgen.index.StructuralIndexBuilder;
+import com.docgen.model.StructuralIndex;
 import com.docgen.proposal.ProposalService;
 import com.docgen.recovery.CheckpointMeta;
 import com.docgen.recovery.CommitMeta;
 import com.docgen.recovery.CommitStore;
 import com.docgen.recovery.CheckpointStore;
 import com.docgen.recovery.DocumentWorkspace;
+import com.docgen.recovery.SnapshotDiff;
+import org.docx4j.openpackaging.packages.WordprocessingMLPackage;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -14,8 +18,10 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.io.ByteArrayInputStream;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
@@ -30,16 +36,19 @@ public class RecoveryController {
     private final CommitStore commitStore;
     private final CheckpointStore checkpointStore;
     private final ProposalService proposalService;
+    private final StructuralIndexBuilder structuralIndexBuilder;
 
     public RecoveryController(
             DocumentWorkspace workspace,
             CommitStore commitStore,
             CheckpointStore checkpointStore,
-            ProposalService proposalService) {
+            ProposalService proposalService,
+            StructuralIndexBuilder structuralIndexBuilder) {
         this.workspace = workspace;
         this.commitStore = commitStore;
         this.checkpointStore = checkpointStore;
         this.proposalService = proposalService;
+        this.structuralIndexBuilder = structuralIndexBuilder;
     }
 
     @GetMapping("/{name}/commits")
@@ -113,5 +122,52 @@ public class RecoveryController {
                 "restored", "checkpoint",
                 "checkpoint_id", checkpointId,
                 "rejected_proposals", rejected);
+    }
+
+    /**
+     * "Trace the changes" between any two commits/checkpoints/the live
+     * working document: a block-level diff (added/removed/modified, keyed by
+     * the same target_ids used everywhere else) rather than just two
+     * downloadable snapshots. Pass fromType/toType "live" (id ignored, any
+     * placeholder works) to compare against the current on-disk document —
+     * this is what drives the inline git-style diff markup in Preview.
+     */
+    @GetMapping("/{name}/diff")
+    public Map<String, Object> diff(
+            @PathVariable("name") String name,
+            @RequestParam("fromType") String fromType,
+            @RequestParam(value = "from", required = false) String fromId,
+            @RequestParam("toType") String toType,
+            @RequestParam(value = "to", required = false) String toId) throws Exception {
+        byte[] fromBytes = loadSnapshotBytes(name, fromType, fromId);
+        byte[] toBytes = loadSnapshotBytes(name, toType, toId);
+        StructuralIndex fromIndex = indexFromBytes(name, fromBytes);
+        StructuralIndex toIndex = indexFromBytes(name, toBytes);
+        SnapshotDiff.Result result = SnapshotDiff.compute(fromIndex, toIndex);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("doc_name", name);
+        response.put("from", Map.of("type", fromType, "id", fromId));
+        response.put("to", Map.of("type", toType, "id", toId));
+        response.put("added", result.added());
+        response.put("removed", result.removed());
+        response.put("modified", result.modified());
+        response.put("unchanged_count", result.unchangedCount());
+        return response;
+    }
+
+    private byte[] loadSnapshotBytes(String docName, String type, String id) {
+        if ("live".equals(type)) {
+            return workspace.readShadow(docName);
+        }
+        if ("checkpoint".equals(type)) {
+            return checkpointStore.loadSnapshot(docName, id);
+        }
+        return commitStore.loadSnapshot(docName, id);
+    }
+
+    private StructuralIndex indexFromBytes(String docName, byte[] bytes) throws Exception {
+        WordprocessingMLPackage pkg = WordprocessingMLPackage.load(new ByteArrayInputStream(bytes));
+        return structuralIndexBuilder.build(pkg, docName);
     }
 }
