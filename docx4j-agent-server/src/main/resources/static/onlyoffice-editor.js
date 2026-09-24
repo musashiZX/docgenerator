@@ -124,13 +124,7 @@ window.OnlyOfficeEditor = (() => {
       log("error", `Edit in Word: save request failed: ${e.message}`);
     }
 
-    if (currentEditor && currentEditor.destroyEditor) {
-      currentEditor.destroyEditor();
-    }
-    currentEditor = null;
-    currentDocName = null;
-    currentKey = null;
-
+    discardOpenEditor();
     document.getElementById("onlyoffice-inline").hidden = true;
     const frame = document.getElementById("preview-frame");
     if (frame) frame.style.visibility = "";
@@ -140,7 +134,48 @@ window.OnlyOfficeEditor = (() => {
     return ok;
   }
 
-  return { open, closeAndSave, isOpen };
+  /** Destroys with no save (never forcesave — see discardOpenEditor's docs) and clears state. */
+  function discardOpenEditor() {
+    if (currentEditor && currentEditor.destroyEditor) {
+      currentEditor.destroyEditor();
+    }
+    currentEditor = null;
+    currentDocName = null;
+    currentKey = null;
+  }
+
+  /**
+   * The document changed server-side (an AI edit was approved, a commit was
+   * restored) while this editor was open, showing the pre-change content.
+   * Must NOT go through closeAndSave: forcesaving would push the editor's
+   * own stale in-memory copy back to the server and silently clobber the
+   * change that just landed. Discards with no save and reopens fresh
+   * (a new editor-config fetch picks up the new file — mtime/size changed,
+   * so it's also a new co-editing key, not a stale cached session).
+   * No-op when not open — the next open() will see fresh content anyway.
+   */
+  async function refreshIfOpen(opts) {
+    if (!isOpen()) return;
+    const docName = currentDocName;
+    discardOpenEditor();
+    await open(docName, opts);
+  }
+
+  /**
+   * Same "never forcesave stale content" safety as refreshIfOpen, for a
+   * caller (the functional test runner) that wants the read-only diff view
+   * revealed instead — discards without reopening.
+   */
+  function discardIfOpen() {
+    if (!isOpen()) return;
+    discardOpenEditor();
+    document.getElementById("onlyoffice-inline").hidden = true;
+    const frame = document.getElementById("preview-frame");
+    if (frame) frame.style.visibility = "";
+    setStatus(null);
+  }
+
+  return { open, closeAndSave, refreshIfOpen, discardIfOpen, isOpen };
 })();
 
 window.addEventListener("beforeunload", (e) => {

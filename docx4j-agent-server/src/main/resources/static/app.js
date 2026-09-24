@@ -172,6 +172,9 @@ function refreshRecoveryPanel() {
       await loadIndex();
       await loadProposals();
       if (state.view === "preview") await loadPreview();
+      if (window.OnlyOfficeEditor) {
+        await OnlyOfficeEditor.refreshIfOpen({ log: (kind, msg) => log(kind, msg) });
+      }
     },
     onCommitted: async () => {
       state.previewLoadedFor = null;
@@ -707,6 +710,9 @@ function mountPreviewHistory() {
       await loadIndex();
       await loadProposals();
       await loadPreview();
+      if (window.OnlyOfficeEditor) {
+        await OnlyOfficeEditor.refreshIfOpen({ log: (kind, msg) => log(kind, msg) });
+      }
       state.recoveryPanel?.refresh();
     },
     onCommitted: async () => {
@@ -1265,6 +1271,9 @@ async function approveSessionProposal() {
     state.previewLoadedFor = null;
     await loadIndex(body.changed_ids || []);
     if (state.view === "preview") await loadPreview();
+    if (window.OnlyOfficeEditor) {
+      await OnlyOfficeEditor.refreshIfOpen({ log: (kind, msg) => log(kind, msg) });
+    }
     state.recoveryPanel?.refresh();
     await loadSession();
     await loadProposals();
@@ -1808,6 +1817,7 @@ function ftOnProposalApproved(proposalId, changedIds) {
   if (!tr.active || tr.phase !== "awaiting_approve" || proposalId !== tr.currentProposalId) return;
   tr.phase = "awaiting_verdict";
   ftHighlightBlockIds(changedIds || []);
+  if (window.OnlyOfficeEditor) OnlyOfficeEditor.discardIfOpen(); // reveal the diff view, never forcesave stale content over the just-approved edit
   setView("preview");
   ftSetStatus("Approved — review Preview/Blocks, then mark Pass or Fail for this test.");
   ftSetVerdictButtons("awaiting_verdict");
