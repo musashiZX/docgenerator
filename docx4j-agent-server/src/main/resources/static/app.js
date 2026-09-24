@@ -1510,6 +1510,17 @@ $("btn-refresh-index").onclick = () => {
 };
 $("btn-block-editor-save").onclick = saveBlockEditor;
 $("btn-block-editor-cancel").onclick = () => closeBlockEditor();
+$("btn-edit-in-word").onclick = () => {
+  if (!state.currentDoc || !window.OnlyOfficeEditor) return;
+  OnlyOfficeEditor.open(state.currentDoc, {
+    log: (kind, msg) => log(kind, msg),
+    onSaved: async () => {
+      state.previewLoadedFor = null;
+      await loadIndex();
+      if (state.view === "preview") await loadPreview();
+    },
+  });
+};
 $("btn-preview-commit-toggle").onclick = () => {
   const box = $("preview-commit-box");
   box.hidden = !box.hidden;

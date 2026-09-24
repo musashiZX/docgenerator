@@ -1,0 +1,24 @@
+version: "3"
+
+# Self-hosted OnlyOffice Document Server for the "Edit in Word" manual-edit
+# mode (see ../docs/ONLYOFFICE.md). Community Edition: free, ~20 concurrent
+# connections — plenty for an internal tool. Run with:
+#   docker compose -f docker/onlyoffice-compose.yml up -d
+services:
+  onlyoffice-documentserver:
+    image: onlyoffice/documentserver:latest
+    container_name: onlyoffice-documentserver
+    ports:
+      - "8082:80"
+    environment:
+      # Must match app.onlyoffice.jwt-secret / ONLYOFFICE_JWT_SECRET.
+      # Leave both unset only for local single-user dev.
+      - JWT_ENABLED=${ONLYOFFICE_JWT_ENABLED:-false}
+      - JWT_SECRET=${ONLYOFFICE_JWT_SECRET:-}
+    volumes:
+      - onlyoffice-data:/var/www/onlyoffice/Data
+      - onlyoffice-logs:/var/log/onlyoffice
+
+volumes:
+  onlyoffice-data:
+  onlyoffice-logs:

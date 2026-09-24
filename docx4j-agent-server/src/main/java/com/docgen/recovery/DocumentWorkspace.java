@@ -61,6 +61,11 @@ public class DocumentWorkspace {
         return checkpointStore.create(docName, beforeBytes, proposalId, summary);
     }
 
+    /** Snapshots the pre-edit state before a manual (OnlyOffice) save overwrites it. */
+    public CheckpointMeta createCheckpointBeforeManualEdit(String docName, byte[] beforeBytes) {
+        return checkpointStore.create(docName, beforeBytes, null, "Before manual edit (OnlyOffice)");
+    }
+
     public Optional<CommitMeta> getHead(String docName) {
         return commitStore.getHead(docName);
     }

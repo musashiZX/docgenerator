@@ -42,6 +42,11 @@ python evals/run.py                                        # LLM eval tier, need
 - **Version control**: commits (named milestones), automatic checkpoints
   (one per approved edit), restore, and a block-level diff between any two
   snapshots.
+- **Edit in Word**: a second, manual editing surface — a full Word-like
+  WYSIWYG editor (self-hosted OnlyOffice Document Server) embedded right in
+  Preview, for direct edits alongside the AI chat flow. Manual edits show up
+  in the same diff/checkpoint/commit system as an AI-approved edit. See
+  `docs/ONLYOFFICE.md`.
 - **Performance**: the structural index and rendered preview are cached by
   file version — repeat views are single-digit milliseconds; only an actual
   edit pays the real recompute cost.

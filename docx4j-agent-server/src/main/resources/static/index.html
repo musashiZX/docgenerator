@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>docx4j Agent Console</title>
-  <link rel="stylesheet" href="style.css?v=8">
+  <link rel="stylesheet" href="style.css?v=9">
 </head>
 <body>
   <header class="topbar">
@@ -82,6 +82,7 @@
         <div class="preview-topbar" id="preview-topbar" hidden>
           <button type="button" class="preview-diff-summary-btn" id="preview-diff-summary"></button>
           <div class="preview-topbar-actions">
+            <button class="btn ghost sm" id="btn-edit-in-word" title="Open in a full Word-like editor for direct manual editing">Edit in Word&#8230;</button>
             <button class="btn ghost sm" id="btn-preview-commit-toggle">Commit&#8230;</button>
             <button class="btn ghost sm" id="btn-preview-history-toggle">History</button>
           </div>
@@ -215,8 +216,19 @@
     </aside>
   </main>
 
+  <div class="onlyoffice-overlay" id="onlyoffice-overlay" hidden>
+    <div class="onlyoffice-overlay-head">
+      <span id="onlyoffice-overlay-title">Edit in Word</span>
+      <button class="btn ghost sm" id="btn-onlyoffice-close">&times; Close</button>
+    </div>
+    <div class="onlyoffice-overlay-body" id="onlyoffice-overlay-body">
+      <div id="onlyoffice-editor-container" class="onlyoffice-editor-container"></div>
+    </div>
+  </div>
+
   <script src="recovery-ui.js?v=1"></script>
   <script src="block-editor.bundle.js?v=1"></script>
+  <script src="onlyoffice-editor.js?v=1"></script>
   <script src="app.js?v=10"></script>
 </body>
 </html>

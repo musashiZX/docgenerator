@@ -24,6 +24,18 @@ app:
     provider: ${LLM_PROVIDER:openai}
     gemini-api-key: ${GEMINI_API_KEY:}
     gemini-model: ${GEMINI_MODEL:gemini-3.5-flash-lite}
+  # Self-hosted OnlyOffice Document Server (docker/onlyoffice-compose.yml) for
+  # manual WYSIWYG editing alongside the AI chat flow. See docs/ONLYOFFICE.md.
+  onlyoffice:
+    enabled: ${ONLYOFFICE_ENABLED:true}
+    document-server-url: ${ONLYOFFICE_DOCUMENT_SERVER_URL:http://localhost:8082}
+    # How the Document Server (in Docker) reaches this app to fetch/save
+    # documents. host.docker.internal is the Docker Desktop default; override
+    # for other setups (a shared docker-compose network, a real hostname).
+    callback-base-url: ${ONLYOFFICE_CALLBACK_BASE_URL:http://host.docker.internal:8081}
+    # Empty disables JWT (fine for local dev only). Set in production — must
+    # match the Document Server's JWT_SECRET.
+    jwt-secret: ${ONLYOFFICE_JWT_SECRET:}
 
 logging:
   level:

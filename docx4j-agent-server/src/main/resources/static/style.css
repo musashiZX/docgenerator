@@ -809,3 +809,23 @@ table.blocks tr.focus-block.test-highlight { background: #eef2ff; box-shadow: in
 .recovery-diff-before { color: var(--red); text-decoration: line-through; }
 .recovery-diff-after { color: var(--green); }
 .recovery-diff-arrow { color: var(--muted); }
+
+.onlyoffice-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  flex-direction: column;
+  background: var(--panel);
+}
+.onlyoffice-overlay:not([hidden]) { display: flex; }
+.onlyoffice-overlay-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+.onlyoffice-overlay-body { flex: 1; min-height: 0; }
+.onlyoffice-editor-container { width: 100%; height: 100%; }
