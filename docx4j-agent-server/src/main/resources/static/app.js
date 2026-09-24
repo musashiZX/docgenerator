@@ -169,12 +169,12 @@ function refreshRecoveryPanel() {
       state.previewLoadedFor = null;
       state.mutations = [];
       renderBatch();
-      await loadIndex();
-      await loadProposals();
-      if (state.view === "preview") await loadPreview();
-      if (window.OnlyOfficeEditor) {
-        await OnlyOfficeEditor.refreshIfOpen({ log: (kind, msg) => log(kind, msg) });
-      }
+      dropWordEditorToPreview();
+      await Promise.all([
+        loadIndex(),
+        loadProposals(),
+        state.view === "preview" ? loadPreview() : Promise.resolve(),
+      ]);
     },
     onCommitted: async () => {
       state.previewLoadedFor = null;
@@ -369,7 +369,9 @@ async function loadPreview() {
 // Messages from the preview iframe: dgEditBlock opens the real editor;
 // dgBlockId is the structural action menu (hover button or Ctrl+click-focus).
 window.addEventListener("message", (e) => {
-  if (!e.data) return;
+  // OnlyOffice's iframe also posts messages to window (JSON-stringified
+  // lifecycle events, e.g. onAppReady) — e.data isn't always an object.
+  if (!e.data || typeof e.data !== "object") return;
   if ("dgEditBlock" in e.data) {
     openBlockEditor(e.data.dgEditBlock);
     return;
@@ -707,12 +709,12 @@ function mountPreviewHistory() {
     onRestored: async () => {
       state.mutations = [];
       renderBatch();
-      await loadIndex();
-      await loadProposals();
-      await loadPreview();
-      if (window.OnlyOfficeEditor) {
-        await OnlyOfficeEditor.refreshIfOpen({ log: (kind, msg) => log(kind, msg) });
-      }
+      dropWordEditorToPreview();
+      await Promise.all([
+        loadIndex(),
+        loadProposals(),
+        loadPreview(),
+      ]);
       state.recoveryPanel?.refresh();
     },
     onCommitted: async () => {
@@ -1262,6 +1264,28 @@ async function sendSessionMessage() {
   }
 }
 
+// The Document Server's own in-place refresh (refreshFile) is documented
+// to update content without a full reload, but empirically does not — in
+// this environment it fires the full onAppReady/onDocumentReady lifecycle
+// yet leaves the rendered page showing the old text, even after several
+// seconds. A destroy+recreate does work, but costs several real seconds
+// (OnlyOffice re-converting and re-rendering the whole document) — there is
+// no faster "live-patch" available outside the paid Automation API (see
+// docs/ONLYOFFICE.md). So instead of making the user wait on that: drop the
+// stale live editor back to the read-only diff view, which this app can
+// render fresh in well under a second (measured ~100-250ms end to end for a
+// typical document) — that's the surface that can actually satisfy
+// "results in a second". Re-opening "Edit in Word" afterward pays the same
+// unavoidable few-second cost any fresh open does.
+function dropWordEditorToPreview() {
+  if (!window.OnlyOfficeEditor || !OnlyOfficeEditor.isOpen()) return false;
+  OnlyOfficeEditor.discardIfOpen();
+  $("btn-edit-in-word").textContent = "Edit in Word…";
+  $("btn-word-comments").hidden = true;
+  $("word-comments-box").hidden = true;
+  return true;
+}
+
 async function approveSessionProposal() {
   try {
     const res = await fetch(`/api/documents/${encodeURIComponent(state.currentDoc)}/session/approve`, { method: "POST" });
@@ -1269,14 +1293,14 @@ async function approveSessionProposal() {
     if (!res.ok) throw new Error(body.error || body.message || res.statusText);
     log("ok", `Session approved — ${body.applied_count} mutation(s) saved.`);
     state.previewLoadedFor = null;
-    await loadIndex(body.changed_ids || []);
-    if (state.view === "preview") await loadPreview();
-    if (window.OnlyOfficeEditor) {
-      await OnlyOfficeEditor.refreshIfOpen({ log: (kind, msg) => log(kind, msg) });
-    }
+    dropWordEditorToPreview();
+    await Promise.all([
+      loadIndex(body.changed_ids || []),
+      state.view === "preview" ? loadPreview() : Promise.resolve(),
+      loadSession(),
+      loadProposals(),
+    ]);
     state.recoveryPanel?.refresh();
-    await loadSession();
-    await loadProposals();
   } catch (e) {
     log("err", `Could not approve: ${esc(e.message)}`);
   }

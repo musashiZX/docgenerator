@@ -149,22 +149,16 @@ window.OnlyOfficeEditor = (() => {
    * restored) while this editor was open, showing the pre-change content.
    * Must NOT go through closeAndSave: forcesaving would push the editor's
    * own stale in-memory copy back to the server and silently clobber the
-   * change that just landed. Discards with no save and reopens fresh
-   * (a new editor-config fetch picks up the new file — mtime/size changed,
-   * so it's also a new co-editing key, not a stale cached session).
-   * No-op when not open — the next open() will see fresh content anyway.
-   */
-  async function refreshIfOpen(opts) {
-    if (!isOpen()) return;
-    const docName = currentDocName;
-    discardOpenEditor();
-    await open(docName, opts);
-  }
-
-  /**
-   * Same "never forcesave stale content" safety as refreshIfOpen, for a
-   * caller (the functional test runner) that wants the read-only diff view
-   * revealed instead — discards without reopening.
+   * change that just landed. Discards with no save and reveals the (fast,
+   * sub-second) read-only diff view instead of trying to refresh the live
+   * editor in place — the Document Server's own refreshFile(config) is
+   * documented to do exactly that without a reload, but empirically does
+   * not in this environment (fires the full onAppReady/onDocumentReady
+   * lifecycle yet leaves the old text on screen), and a destroy+recreate
+   * costs several real seconds (OnlyOffice re-converting and re-rendering
+   * the whole document) — too slow to be the automatic "just happened"
+   * feedback. Re-opening "Edit in Word" afterward pays that same
+   * unavoidable cost any fresh open does. No-op when not open.
    */
   function discardIfOpen() {
     if (!isOpen()) return;
@@ -175,7 +169,7 @@ window.OnlyOfficeEditor = (() => {
     setStatus(null);
   }
 
-  return { open, closeAndSave, refreshIfOpen, discardIfOpen, isOpen };
+  return { open, closeAndSave, discardIfOpen, isOpen };
 })();
 
 window.addEventListener("beforeunload", (e) => {
