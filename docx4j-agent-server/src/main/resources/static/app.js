@@ -18,6 +18,7 @@ const state = {
   recoveryPanel: null,
   headCommitId: null,
   selectedBlockIds: [], // blocks focused for AI context (Ctrl+click to add/remove)
+  commentFocus: null, // { commentId, anchorText, commentText } from a comment picked in the Word editor
   testRunner: {
     active: false,
     phase: null, // null | "proposing" | "awaiting_approve" | "awaiting_verdict" | "error"
@@ -781,6 +782,7 @@ function selectedBlocksForAi() {
 }
 
 function selectedTextForAi() {
+  if (state.commentFocus) return state.commentFocus.anchorText || null;
   const blocks = selectedBlocksForAi();
   if (blocks.length === 0) return null;
   if (blocks.length === 1) return blocks[0].text || null;
@@ -790,6 +792,16 @@ function selectedTextForAi() {
 function updateAiSelectionHint() {
   const el = $("ai-selection-hint");
   if (!el) return;
+  if (state.commentFocus) {
+    el.hidden = false;
+    el.innerHTML =
+      `<span class="focus-label">Focus (from a Word comment):</span><br>` +
+      `<span class="muted">"${esc(state.commentFocus.anchorText.slice(0, 80))}${state.commentFocus.anchorText.length > 80 ? "…" : ""}"</span>` +
+      `<br><button class="btn ghost sm" id="btn-clear-selection">Clear</button>`;
+    const btn = $("btn-clear-selection");
+    if (btn) btn.onclick = () => { state.commentFocus = null; updateAiSelectionHint(); };
+    return;
+  }
   if (state.selectedBlockIds.length === 0) {
     el.hidden = true;
     return;
@@ -1523,8 +1535,49 @@ async function closeWordEditor() {
     },
   });
   $("btn-edit-in-word").textContent = "Edit in Word…";
+  $("btn-word-comments").hidden = true;
+  $("word-comments-box").hidden = true;
   return ok;
 }
+
+async function loadWordComments() {
+  const list = $("word-comments-list");
+  list.innerHTML = "<div class=\"muted\">Loading…</div>";
+  try {
+    const res = await fetch(`/api/onlyoffice/comments/${encodeURIComponent(state.currentDoc)}`);
+    const body = await res.json();
+    const comments = body.comments || [];
+    if (comments.length === 0) {
+      list.innerHTML = "<div class=\"muted\">No comments yet. Select text in the document, "
+        + "right-click &gt; Add comment, describe the edit, then reopen this list.</div>";
+      return;
+    }
+    list.innerHTML = "";
+    for (const c of comments) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "word-comment-item";
+      btn.innerHTML = `<span class="word-comment-anchor">"${esc((c.anchorText || "").slice(0, 60))}"</span>`
+        + `<span class="word-comment-text">${esc(c.commentText)}</span>`;
+      btn.onclick = () => {
+        state.commentFocus = { commentId: c.commentId, anchorText: c.anchorText, commentText: c.commentText };
+        $("ai-prompt").value = c.commentText;
+        updateAiSelectionHint();
+        $("word-comments-box").hidden = true;
+        log("ok", "Picked up a Word comment as AI focus — review the prompt and click Send.");
+      };
+      list.appendChild(btn);
+    }
+  } catch (e) {
+    list.innerHTML = `<div class="muted">Could not load comments: ${esc(e.message)}</div>`;
+  }
+}
+
+$("btn-word-comments").onclick = () => {
+  const box = $("word-comments-box");
+  box.hidden = !box.hidden;
+  if (!box.hidden) loadWordComments();
+};
 
 $("btn-edit-in-word").onclick = async () => {
   if (!state.currentDoc || !window.OnlyOfficeEditor) return;
@@ -1536,7 +1589,10 @@ $("btn-edit-in-word").onclick = async () => {
   btn.disabled = true;
   const opened = await OnlyOfficeEditor.open(state.currentDoc, { log: (kind, msg) => log(kind, msg) });
   btn.disabled = false;
-  if (opened) btn.textContent = "Back to AI Preview…";
+  if (opened) {
+    btn.textContent = "Back to AI Preview…";
+    $("btn-word-comments").hidden = false;
+  }
 };
 $("btn-preview-commit-toggle").onclick = () => {
   const box = $("preview-commit-box");

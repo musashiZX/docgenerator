@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>docx4j Agent Console</title>
-  <link rel="stylesheet" href="style.css?v=9">
+  <link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
   <header class="topbar">
@@ -87,9 +87,14 @@
           <button type="button" class="preview-diff-summary-btn" id="preview-diff-summary"></button>
           <div class="preview-topbar-actions">
             <button class="btn ghost sm" id="btn-edit-in-word" title="Switch this preview to a full Word-like editor for direct manual editing">Edit in Word&#8230;</button>
+            <button class="btn ghost sm" id="btn-word-comments" title="Select text in the Word editor, right-click &gt; Add comment with an instruction, then pick it up here as AI focus" hidden>Comments&#8230;</button>
             <button class="btn ghost sm" id="btn-preview-commit-toggle">Commit&#8230;</button>
             <button class="btn ghost sm" id="btn-preview-history-toggle">History</button>
           </div>
+        </div>
+        <div class="word-comments-box" id="word-comments-box" hidden>
+          <div class="word-comments-hint">Comments left in the Word editor — click one to use it as AI focus:</div>
+          <div id="word-comments-list"></div>
         </div>
         <div class="preview-commit-box" id="preview-commit-box" hidden>
           <input type="text" id="preview-commit-msg" placeholder="Commit message (e.g. Baseline, v1.1)" maxlength="200">
@@ -223,6 +228,6 @@
   <script src="recovery-ui.js?v=1"></script>
   <script src="block-editor.bundle.js?v=1"></script>
   <script src="onlyoffice-editor.js?v=1"></script>
-  <script src="app.js?v=10"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>
