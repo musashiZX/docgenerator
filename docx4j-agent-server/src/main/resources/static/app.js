@@ -104,6 +104,7 @@ async function uploadFile(file) {
 /* ============ structural index ============ */
 async function openDoc(name) {
   if (!closeBlockEditor()) return; // user has unsaved changes and chose to keep editing
+  await closeWordEditor(); // save+close any Word edit on the doc we're leaving
   state.currentDoc = name;
   state.mutations = [];
   state.previewLoadedFor = null;
@@ -189,8 +190,9 @@ async function loadIndex(flashIds) {
 }
 
 /* ============ preview ============ */
-function setView(view) {
+async function setView(view) {
   if (view !== "preview" && !closeBlockEditor()) return; // unsaved changes — stay put
+  if (view !== "preview") await closeWordEditor(); // save+close before leaving the Word editor
   state.view = view;
   hidePreviewMenu();
   $("tab-blocks").classList.toggle("active", view === "blocks");
@@ -1510,9 +1512,9 @@ $("btn-refresh-index").onclick = () => {
 };
 $("btn-block-editor-save").onclick = saveBlockEditor;
 $("btn-block-editor-cancel").onclick = () => closeBlockEditor();
-$("btn-edit-in-word").onclick = () => {
-  if (!state.currentDoc || !window.OnlyOfficeEditor) return;
-  OnlyOfficeEditor.open(state.currentDoc, {
+async function closeWordEditor() {
+  if (!window.OnlyOfficeEditor || !OnlyOfficeEditor.isOpen()) return true;
+  const ok = await OnlyOfficeEditor.closeAndSave({
     log: (kind, msg) => log(kind, msg),
     onSaved: async () => {
       state.previewLoadedFor = null;
@@ -1520,6 +1522,21 @@ $("btn-edit-in-word").onclick = () => {
       if (state.view === "preview") await loadPreview();
     },
   });
+  $("btn-edit-in-word").textContent = "Edit in Word…";
+  return ok;
+}
+
+$("btn-edit-in-word").onclick = async () => {
+  if (!state.currentDoc || !window.OnlyOfficeEditor) return;
+  const btn = $("btn-edit-in-word");
+  if (OnlyOfficeEditor.isOpen()) {
+    await closeWordEditor();
+    return;
+  }
+  btn.disabled = true;
+  const opened = await OnlyOfficeEditor.open(state.currentDoc, { log: (kind, msg) => log(kind, msg) });
+  btn.disabled = false;
+  if (opened) btn.textContent = "Back to AI Preview…";
 };
 $("btn-preview-commit-toggle").onclick = () => {
   const box = $("preview-commit-box");

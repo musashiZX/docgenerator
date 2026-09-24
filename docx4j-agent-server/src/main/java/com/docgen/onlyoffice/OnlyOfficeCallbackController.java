@@ -37,17 +37,20 @@ public class OnlyOfficeCallbackController {
     private final DocumentLoader documentLoader;
     private final DocumentWorkspace workspace;
     private final BookmarkIndexer bookmarkIndexer;
+    private final OnlyOfficeSaveCoordinator saveCoordinator;
     private final RestClient restClient = RestClient.create();
 
     public OnlyOfficeCallbackController(
             OnlyOfficeJwtService jwtService,
             DocumentLoader documentLoader,
             DocumentWorkspace workspace,
-            BookmarkIndexer bookmarkIndexer) {
+            BookmarkIndexer bookmarkIndexer,
+            OnlyOfficeSaveCoordinator saveCoordinator) {
         this.jwtService = jwtService;
         this.documentLoader = documentLoader;
         this.workspace = workspace;
         this.bookmarkIndexer = bookmarkIndexer;
+        this.saveCoordinator = saveCoordinator;
     }
 
     @PostMapping("/callback/{name}")
@@ -69,12 +72,20 @@ public class OnlyOfficeCallbackController {
         if ((status == 2 || status == 6) && downloadUrl != null) {
             try {
                 saveIncomingDocument(name, downloadUrl);
+                saveCoordinator.complete(name);
             } catch (Exception e) {
                 log.error("Failed to persist OnlyOffice save for {}: {}", name, e.toString());
+                saveCoordinator.completeExceptionally(name, e);
                 return Map.of("error", 1);
             }
+        } else if (status == 4) {
+            // Closed with no changes to save — nothing to persist, but a
+            // pending forcesave-and-wait should still unblock.
+            saveCoordinator.complete(name);
+        } else if (status == 3 || status == 7) {
+            saveCoordinator.completeExceptionally(name, new IllegalStateException("OnlyOffice reported save status " + status));
         }
-        // Other statuses (1 editing, 4 closed-no-changes, 3/7 errors) need no action.
+        // status 1 (still editing) needs no action.
         return Map.of("error", 0);
     }
 

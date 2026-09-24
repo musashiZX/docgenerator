@@ -72,6 +72,10 @@
       <div class="preview-wrap" id="preview-wrap" hidden>
         <div class="preview-loading" id="preview-loading">Rendering preview&#8230;</div>
         <iframe id="preview-frame" title="Document preview"></iframe>
+        <div class="onlyoffice-inline" id="onlyoffice-inline" hidden>
+          <div class="onlyoffice-inline-status" id="onlyoffice-inline-status" hidden></div>
+          <div id="onlyoffice-editor-container" class="onlyoffice-editor-container"></div>
+        </div>
         <div class="block-editor-overlay" id="block-editor-overlay" hidden>
           <div id="block-editor-mount"></div>
           <div class="block-editor-actions">
@@ -82,7 +86,7 @@
         <div class="preview-topbar" id="preview-topbar" hidden>
           <button type="button" class="preview-diff-summary-btn" id="preview-diff-summary"></button>
           <div class="preview-topbar-actions">
-            <button class="btn ghost sm" id="btn-edit-in-word" title="Open in a full Word-like editor for direct manual editing">Edit in Word&#8230;</button>
+            <button class="btn ghost sm" id="btn-edit-in-word" title="Switch this preview to a full Word-like editor for direct manual editing">Edit in Word&#8230;</button>
             <button class="btn ghost sm" id="btn-preview-commit-toggle">Commit&#8230;</button>
             <button class="btn ghost sm" id="btn-preview-history-toggle">History</button>
           </div>
@@ -215,16 +219,6 @@
       <div class="log" id="log"></div>
     </aside>
   </main>
-
-  <div class="onlyoffice-overlay" id="onlyoffice-overlay" hidden>
-    <div class="onlyoffice-overlay-head">
-      <span id="onlyoffice-overlay-title">Edit in Word</span>
-      <button class="btn ghost sm" id="btn-onlyoffice-close">&times; Close</button>
-    </div>
-    <div class="onlyoffice-overlay-body" id="onlyoffice-overlay-body">
-      <div id="onlyoffice-editor-container" class="onlyoffice-editor-container"></div>
-    </div>
-  </div>
 
   <script src="recovery-ui.js?v=1"></script>
   <script src="block-editor.bundle.js?v=1"></script>
