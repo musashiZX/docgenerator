@@ -9,7 +9,7 @@ const state = {
   // insert: { op:"insert", anchorId, position, text, style }
   // delete: { op:"delete", targetId }
   mutations: [],
-  view: "blocks", // "blocks" | "preview" | "history"
+  view: "preview", // "blocks" | "preview" | "history" — preview (Word editor by default) is primary now
   previewLoadedFor: null, // doc name the iframe currently shows
   previewDiff: null, // last live-vs-HEAD diff (drives inline git-style markup)
   previewHistoryPanel: null, // RecoveryUI instance mounted in the Preview drawer
@@ -111,6 +111,7 @@ async function openDoc(name) {
   state.previewLoadedFor = null;
   state.previewDiff = null;
   state.selectedBlockIds = [];
+  state.commentFocus = null;
   state.session = null;
   $("prompt-history-drawer").hidden = true;
   updateAiSelectionHint();
@@ -126,7 +127,10 @@ async function openDoc(name) {
   refreshRecoveryPanel();
   state.previewHistoryPanel?.refresh();
   updateHistoryNavLink();
-  if (state.view === "preview") await loadPreview();
+  if (state.view === "preview") {
+    await loadPreview();
+    await openWordEditor();
+  }
 }
 
 function updateHistoryNavLink() {
@@ -1524,6 +1528,24 @@ $("btn-refresh-index").onclick = () => {
 };
 $("btn-block-editor-save").onclick = saveBlockEditor;
 $("btn-block-editor-cancel").onclick = () => closeBlockEditor();
+// Word editor is the default, primary way to view+edit a document now —
+// the read-only HTML preview only reappears when the user explicitly asks
+// for the AI diff view ("Back to AI Preview…"). Not used by the functional
+// test runner's own setView("preview") calls, which want that diff view
+// specifically — auto-open is wired at the two "user just landed here"
+// moments (opening a doc, clicking the Preview tab) instead.
+async function openWordEditor() {
+  if (!state.currentDoc || !window.OnlyOfficeEditor || OnlyOfficeEditor.isOpen()) return;
+  const btn = $("btn-edit-in-word");
+  btn.disabled = true;
+  const opened = await OnlyOfficeEditor.open(state.currentDoc, { log: (kind, msg) => log(kind, msg) });
+  btn.disabled = false;
+  if (opened) {
+    btn.textContent = "Back to AI Preview…";
+    $("btn-word-comments").hidden = false;
+  }
+}
+
 async function closeWordEditor() {
   if (!window.OnlyOfficeEditor || !OnlyOfficeEditor.isOpen()) return true;
   const ok = await OnlyOfficeEditor.closeAndSave({
@@ -1581,17 +1603,10 @@ $("btn-word-comments").onclick = () => {
 
 $("btn-edit-in-word").onclick = async () => {
   if (!state.currentDoc || !window.OnlyOfficeEditor) return;
-  const btn = $("btn-edit-in-word");
   if (OnlyOfficeEditor.isOpen()) {
     await closeWordEditor();
-    return;
-  }
-  btn.disabled = true;
-  const opened = await OnlyOfficeEditor.open(state.currentDoc, { log: (kind, msg) => log(kind, msg) });
-  btn.disabled = false;
-  if (opened) {
-    btn.textContent = "Back to AI Preview…";
-    $("btn-word-comments").hidden = false;
+  } else {
+    await openWordEditor();
   }
 };
 $("btn-preview-commit-toggle").onclick = () => {
@@ -1616,7 +1631,7 @@ $("preview-diff-summary").onclick = () => {
   panel.hidden = false;
 };
 $("tab-blocks").onclick = () => setView("blocks");
-$("tab-preview").onclick = () => setView("preview");
+$("tab-preview").onclick = async () => { await setView("preview"); await openWordEditor(); };
 $("tab-history").onclick = () => setView("history");
 // Clicking anywhere in the console outside the floating menu closes it.
 document.addEventListener("click", (e) => {

@@ -43,8 +43,8 @@
         <h2 id="doc-title">Select a document</h2>
         <div class="head-actions" id="doc-actions" hidden>
           <div class="view-tabs" id="view-tabs">
-            <button class="tab active" data-view="blocks" id="tab-blocks">Blocks</button>
-            <button class="tab" data-view="preview" id="tab-preview">Preview</button>
+            <button class="tab" data-view="blocks" id="tab-blocks" hidden>Blocks</button>
+            <button class="tab active" data-view="preview" id="tab-preview">Preview</button>
             <button class="tab" data-view="history" id="tab-history">History</button>
           </div>
           <span class="head-badge" id="head-badge" hidden title="Latest committed snapshot"></span>
@@ -57,17 +57,12 @@
         <span id="ft-banner-title"></span>
       </div>
       <p class="hint" id="index-hint">
-        Upload or pick a document on the left. Its block index (with stable
-        <code>target_id</code>s) will appear here. Use <b>Edit</b> to stage a text change,
-        <b>+&#8593;</b>/<b>+&#8595;</b> to insert a paragraph before/after, and <b>Del</b>
-        to delete a paragraph (paragraphs only — table cells support Edit).
-        Switch to <b>Preview</b> to edit with a real editor — click any paragraph or cell
-        to open it in a rich-text editor with its own toolbar (Bold/Italic/Underline/Size/
-        Align), edit, then <b>Save</b>. Hover the <b>&#8942;</b> button for insert/delete/
-        focus actions, <b>Ctrl+click</b> to focus blocks for AI (multiple allowed). Changed
-        blocks are marked like a diff (green = new, blue = modified) versus your last
-        commit — use <b>Commit</b>/<b>History</b> above the preview to save a milestone or
-        roll back. Click a Blocks row to focus one block; Ctrl+click to add/remove.
+        Upload or pick a document on the left. It opens straight into a full Word-like
+        editor for direct manual edits — <b>select text, right-click &gt; Add comment</b>
+        to describe an edit, then pick it up with the <b>Comments…</b> button as AI focus.
+        Click <b>Back to AI Preview…</b> to see changes as a diff (green = new, blue =
+        modified) versus your last commit, and use <b>Commit</b>/<b>History</b> there to
+        save a milestone or roll back.
       </p>
       <div class="preview-wrap" id="preview-wrap" hidden>
         <div class="preview-loading" id="preview-loading">Rendering preview&#8230;</div>
@@ -228,6 +223,6 @@
   <script src="recovery-ui.js?v=1"></script>
   <script src="block-editor.bundle.js?v=1"></script>
   <script src="onlyoffice-editor.js?v=1"></script>
-  <script src="app.js?v=11"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>
