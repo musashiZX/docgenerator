@@ -1,13 +1,12 @@
-// Manual "Edit in Word" surface: swaps the read-only preview for a live,
-// self-hosted OnlyOffice editor in place — same panel, same Commit/History
-// topbar, not a separate page. Both surfaces write to the same .docx (the
-// project's existing "last save wins" convention).
-//
-// The Document Server's own save/close behavior isn't reliable embedded in
-// an iframe, so closing this editor always goes through an explicit
-// forcesave-and-wait round trip to the backend (see
-// OnlyOfficeForceSaveController) rather than trusting an implicit
-// disconnect-triggered save.
+// Manual Editing surface: a self-hosted OnlyOffice editor, its own tab
+// (word-wrap), deliberately separate from AI Editing (the diff view) — see
+// setView in app.js. They're not meant to be used at the same time, so this
+// module only has two real operations: open fresh (always current content,
+// no staleness possible) and close-with-save (forcesave, waited-for, before
+// tearing down — see docs/ONLYOFFICE.md for why an in-place refresh isn't
+// used: the Document Server's refreshFile() is documented to update a live
+// session without a reload, but doesn't actually update the rendered page
+// in this environment; a fresh open every time is what's reliable).
 window.OnlyOfficeEditor = (() => {
   let apiScriptPromise = null;
   let currentEditor = null;
@@ -43,14 +42,9 @@ window.OnlyOfficeEditor = (() => {
   async function open(docName, opts) {
     opts = opts || {};
     const log = opts.log || (() => {});
-    const inline = document.getElementById("onlyoffice-inline");
-    const frame = document.getElementById("preview-frame");
     const container = document.getElementById("onlyoffice-editor-container");
-
     container.innerHTML = "";
     setStatus(null);
-    inline.hidden = false;
-    if (frame) frame.style.visibility = "hidden";
 
     let payload;
     try {
@@ -58,18 +52,16 @@ window.OnlyOfficeEditor = (() => {
       if (!res.ok) throw new Error(`editor-config failed: ${res.status}`);
       payload = await res.json();
     } catch (e) {
-      log("error", `Edit in Word: ${e.message}. Is the OnlyOffice Document Server running (docker compose -f docker/onlyoffice-compose.yml up -d)?`);
-      inline.hidden = true;
-      if (frame) frame.style.visibility = "";
+      log("error", `Manual Editing: ${e.message}. Is the OnlyOffice Document Server running (docker compose -f docker/onlyoffice-compose.yml up -d)?`);
+      setStatus("Could not load the document editor — see Activity log.", "error");
       return false;
     }
 
     try {
       await loadApiScript(payload.documentServerUrl);
     } catch (e) {
-      log("error", `Edit in Word: ${e.message}`);
-      inline.hidden = true;
-      if (frame) frame.style.visibility = "";
+      log("error", `Manual Editing: ${e.message}`);
+      setStatus("Could not load the document editor — see Activity log.", "error");
       return false;
     }
 
@@ -78,8 +70,8 @@ window.OnlyOfficeEditor = (() => {
 
     const config = Object.assign({}, payload.config, {
       events: {
-        onAppReady: () => log("info", "Edit in Word: editor ready."),
-        onError: (e) => log("error", `Edit in Word: ${JSON.stringify(e && e.data)}`),
+        onAppReady: () => log("info", "Manual Editing: editor ready."),
+        onError: (e) => log("error", `Manual Editing: ${JSON.stringify(e && e.data)}`),
       },
     });
     currentEditor = new DocsAPI.DocEditor("onlyoffice-editor-container", config);
@@ -87,11 +79,10 @@ window.OnlyOfficeEditor = (() => {
   }
 
   /**
-   * Saves (waiting for the callback to actually land), destroys the editor,
-   * and switches back to the read-only preview. Always resolves — never
-   * throws — so callers (switching document, switching view) can await it
-   * unconditionally; a failed/timed-out save is reported via `log` and
-   * surfaced in the status strip, not thrown.
+   * Saves (waiting for the callback to actually land) and destroys the
+   * editor. Always resolves — never throws — so callers (switching
+   * document, switching view) can await it unconditionally; a failed/timed
+   * -out save is reported via `log`, not thrown.
    */
   async function closeAndSave(opts) {
     opts = opts || {};
@@ -111,65 +102,32 @@ window.OnlyOfficeEditor = (() => {
       });
       const body = await res.json().catch(() => ({}));
       if (body.status === "saved" || body.status === "no_changes") {
-        log("ok", "Edit in Word: saved.");
+        log("ok", "Manual Editing: saved.");
       } else if (body.status === "timeout") {
         ok = false;
-        log("error", "Edit in Word: save timed out — the Document Server may not have reached this app. Check docs/ONLYOFFICE.md.");
+        log("error", "Manual Editing: save timed out — the Document Server may not have reached this app. Check docs/ONLYOFFICE.md.");
       } else {
         ok = false;
-        log("error", `Edit in Word: save failed (${body.detail || body.status || res.status}).`);
+        log("error", `Manual Editing: save failed (${body.detail || body.status || res.status}).`);
       }
     } catch (e) {
       ok = false;
-      log("error", `Edit in Word: save request failed: ${e.message}`);
+      log("error", `Manual Editing: save request failed: ${e.message}`);
     }
 
-    discardOpenEditor();
-    document.getElementById("onlyoffice-inline").hidden = true;
-    const frame = document.getElementById("preview-frame");
-    if (frame) frame.style.visibility = "";
-    setStatus(null);
-
-    if (opts.onSaved) await opts.onSaved(ok);
-    return ok;
-  }
-
-  /** Destroys with no save (never forcesave — see discardOpenEditor's docs) and clears state. */
-  function discardOpenEditor() {
     if (currentEditor && currentEditor.destroyEditor) {
       currentEditor.destroyEditor();
     }
     currentEditor = null;
     currentDocName = null;
     currentKey = null;
-  }
-
-  /**
-   * The document changed server-side (an AI edit was approved, a commit was
-   * restored) while this editor was open, showing the pre-change content.
-   * Must NOT go through closeAndSave: forcesaving would push the editor's
-   * own stale in-memory copy back to the server and silently clobber the
-   * change that just landed. Discards with no save and reveals the (fast,
-   * sub-second) read-only diff view instead of trying to refresh the live
-   * editor in place — the Document Server's own refreshFile(config) is
-   * documented to do exactly that without a reload, but empirically does
-   * not in this environment (fires the full onAppReady/onDocumentReady
-   * lifecycle yet leaves the old text on screen), and a destroy+recreate
-   * costs several real seconds (OnlyOffice re-converting and re-rendering
-   * the whole document) — too slow to be the automatic "just happened"
-   * feedback. Re-opening "Edit in Word" afterward pays that same
-   * unavoidable cost any fresh open does. No-op when not open.
-   */
-  function discardIfOpen() {
-    if (!isOpen()) return;
-    discardOpenEditor();
-    document.getElementById("onlyoffice-inline").hidden = true;
-    const frame = document.getElementById("preview-frame");
-    if (frame) frame.style.visibility = "";
     setStatus(null);
+
+    if (opts.onSaved) await opts.onSaved(ok);
+    return ok;
   }
 
-  return { open, closeAndSave, discardIfOpen, isOpen };
+  return { open, closeAndSave, isOpen };
 })();
 
 window.addEventListener("beforeunload", (e) => {

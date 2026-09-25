@@ -9,7 +9,7 @@ const state = {
   // insert: { op:"insert", anchorId, position, text, style }
   // delete: { op:"delete", targetId }
   mutations: [],
-  view: "preview", // "blocks" | "preview" | "history" — preview (Word editor by default) is primary now
+  view: "preview", // "preview" (AI Editing) | "word" (Manual Editing, OnlyOffice) | "history"
   previewLoadedFor: null, // doc name the iframe currently shows
   previewDiff: null, // last live-vs-HEAD diff (drives inline git-style markup)
   previewHistoryPanel: null, // RecoveryUI instance mounted in the Preview drawer
@@ -129,6 +129,7 @@ async function openDoc(name) {
   updateHistoryNavLink();
   if (state.view === "preview") {
     await loadPreview();
+  } else if (state.view === "word") {
     await openWordEditor();
   }
 }
@@ -169,7 +170,6 @@ function refreshRecoveryPanel() {
       state.previewLoadedFor = null;
       state.mutations = [];
       renderBatch();
-      dropWordEditorToPreview();
       await Promise.all([
         loadIndex(),
         loadProposals(),
@@ -198,22 +198,34 @@ async function loadIndex(flashIds) {
 }
 
 /* ============ preview ============ */
+// AI Editing and Manual Editing (OnlyOffice) are two deliberately separate
+// views now — not meant to be used at the same time. They only need to sync
+// at the switch boundary: leaving "word" always forcesaves first (so AI
+// Editing sees the manual edits), entering "word" always opens fresh (so it
+// shows whatever AI Editing last produced). Some latency at that boundary
+// is expected and fine; nothing tries to keep both surfaces live at once
+// anymore, which is what made the old destroy/refresh/race issues go away.
 async function setView(view) {
   if (view !== "preview" && !closeBlockEditor()) return; // unsaved changes — stay put
-  if (view !== "preview") await closeWordEditor(); // save+close before leaving the Word editor
+  const leavingWord = state.view === "word" && view !== "word";
   state.view = view;
   hidePreviewMenu();
-  $("tab-blocks").classList.toggle("active", view === "blocks");
   $("tab-preview").classList.toggle("active", view === "preview");
+  $("tab-word").classList.toggle("active", view === "word");
   $("tab-history").classList.toggle("active", view === "history");
-  $("table-wrap").hidden = !(view === "blocks" && state.currentDoc);
   $("preview-wrap").hidden = !(view === "preview" && state.currentDoc);
+  $("word-wrap").hidden = !(view === "word" && state.currentDoc);
   $("history-wrap").hidden = !(view === "history" && state.currentDoc);
-  if (view === "preview" && state.currentDoc) {
-    // Always refresh — approve/restore can change the doc while the tab name stays the same.
-    loadPreview();
+  if (leavingWord) {
+    await closeWordEditor(); // forcesave manual edits before showing them elsewhere
   }
-  if (view === "history" && state.currentDoc) {
+  if (view === "preview" && state.currentDoc) {
+    // Always refresh — approve/restore/a manual edit can change the doc
+    // while the tab name stays the same.
+    loadPreview();
+  } else if (view === "word" && state.currentDoc) {
+    await openWordEditor();
+  } else if (view === "history" && state.currentDoc) {
     state.recoveryPanel?.refresh();
   }
 }
@@ -709,7 +721,6 @@ function mountPreviewHistory() {
     onRestored: async () => {
       state.mutations = [];
       renderBatch();
-      dropWordEditorToPreview();
       await Promise.all([
         loadIndex(),
         loadProposals(),
@@ -1264,28 +1275,6 @@ async function sendSessionMessage() {
   }
 }
 
-// The Document Server's own in-place refresh (refreshFile) is documented
-// to update content without a full reload, but empirically does not — in
-// this environment it fires the full onAppReady/onDocumentReady lifecycle
-// yet leaves the rendered page showing the old text, even after several
-// seconds. A destroy+recreate does work, but costs several real seconds
-// (OnlyOffice re-converting and re-rendering the whole document) — there is
-// no faster "live-patch" available outside the paid Automation API (see
-// docs/ONLYOFFICE.md). So instead of making the user wait on that: drop the
-// stale live editor back to the read-only diff view, which this app can
-// render fresh in well under a second (measured ~100-250ms end to end for a
-// typical document) — that's the surface that can actually satisfy
-// "results in a second". Re-opening "Edit in Word" afterward pays the same
-// unavoidable few-second cost any fresh open does.
-function dropWordEditorToPreview() {
-  if (!window.OnlyOfficeEditor || !OnlyOfficeEditor.isOpen()) return false;
-  OnlyOfficeEditor.discardIfOpen();
-  $("btn-edit-in-word").textContent = "Edit in Word…";
-  $("btn-word-comments").hidden = true;
-  $("word-comments-box").hidden = true;
-  return true;
-}
-
 async function approveSessionProposal() {
   try {
     const res = await fetch(`/api/documents/${encodeURIComponent(state.currentDoc)}/session/approve`, { method: "POST" });
@@ -1293,7 +1282,9 @@ async function approveSessionProposal() {
     if (!res.ok) throw new Error(body.error || body.message || res.statusText);
     log("ok", `Session approved — ${body.applied_count} mutation(s) saved.`);
     state.previewLoadedFor = null;
-    dropWordEditorToPreview();
+    // AI Editing and Manual Editing are separate tabs now — OnlyOffice is
+    // never open while this runs, so there's nothing to reconcile here.
+    // Switching to Manual Editing afterward opens fresh and picks this up.
     await Promise.all([
       loadIndex(body.changed_ids || []),
       state.view === "preview" ? loadPreview() : Promise.resolve(),
@@ -1561,38 +1552,27 @@ $("btn-refresh-index").onclick = () => {
 };
 $("btn-block-editor-save").onclick = saveBlockEditor;
 $("btn-block-editor-cancel").onclick = () => closeBlockEditor();
-// Word editor is the default, primary way to view+edit a document now —
-// the read-only HTML preview only reappears when the user explicitly asks
-// for the AI diff view ("Back to AI Preview…"). Not used by the functional
-// test runner's own setView("preview") calls, which want that diff view
-// specifically — auto-open is wired at the two "user just landed here"
-// moments (opening a doc, clicking the Preview tab) instead.
+// AI Editing (the diff view + chat) and Manual Editing (this) are separate
+// tabs now, not meant to be used at once — see setView. Opening always
+// fetches fresh: a brand-new session showing whatever's on disk right now,
+// so there's no staleness to reason about, just the unavoidable few-second
+// cost of OnlyOffice spinning up a new editor instance.
 async function openWordEditor() {
   if (!state.currentDoc || !window.OnlyOfficeEditor || OnlyOfficeEditor.isOpen()) return;
-  const btn = $("btn-edit-in-word");
-  btn.disabled = true;
-  const opened = await OnlyOfficeEditor.open(state.currentDoc, { log: (kind, msg) => log(kind, msg) });
-  btn.disabled = false;
-  if (opened) {
-    btn.textContent = "Back to AI Preview…";
-    $("btn-word-comments").hidden = false;
-  }
+  await OnlyOfficeEditor.open(state.currentDoc, { log: (kind, msg) => log(kind, msg) });
 }
 
+// Always forcesaves before tearing down — leaving Manual Editing is the
+// sync point that lets AI Editing see what was typed here.
 async function closeWordEditor() {
   if (!window.OnlyOfficeEditor || !OnlyOfficeEditor.isOpen()) return true;
-  const ok = await OnlyOfficeEditor.closeAndSave({
+  return OnlyOfficeEditor.closeAndSave({
     log: (kind, msg) => log(kind, msg),
     onSaved: async () => {
       state.previewLoadedFor = null;
       await loadIndex();
-      if (state.view === "preview") await loadPreview();
     },
   });
-  $("btn-edit-in-word").textContent = "Edit in Word…";
-  $("btn-word-comments").hidden = true;
-  $("word-comments-box").hidden = true;
-  return ok;
 }
 
 async function loadWordComments() {
@@ -1634,14 +1614,6 @@ $("btn-word-comments").onclick = () => {
   if (!box.hidden) loadWordComments();
 };
 
-$("btn-edit-in-word").onclick = async () => {
-  if (!state.currentDoc || !window.OnlyOfficeEditor) return;
-  if (OnlyOfficeEditor.isOpen()) {
-    await closeWordEditor();
-  } else {
-    await openWordEditor();
-  }
-};
 $("btn-preview-commit-toggle").onclick = () => {
   const box = $("preview-commit-box");
   box.hidden = !box.hidden;
@@ -1663,8 +1635,8 @@ $("preview-diff-summary").onclick = () => {
   panel.innerHTML = renderPreviewDiffPanel(state.previewDiff);
   panel.hidden = false;
 };
-$("tab-blocks").onclick = () => setView("blocks");
-$("tab-preview").onclick = async () => { await setView("preview"); await openWordEditor(); };
+$("tab-preview").onclick = () => setView("preview");
+$("tab-word").onclick = () => setView("word");
 $("tab-history").onclick = () => setView("history");
 // Clicking anywhere in the console outside the floating menu closes it.
 document.addEventListener("click", (e) => {
@@ -1841,9 +1813,8 @@ function ftOnProposalApproved(proposalId, changedIds) {
   if (!tr.active || tr.phase !== "awaiting_approve" || proposalId !== tr.currentProposalId) return;
   tr.phase = "awaiting_verdict";
   ftHighlightBlockIds(changedIds || []);
-  if (window.OnlyOfficeEditor) OnlyOfficeEditor.discardIfOpen(); // reveal the diff view, never forcesave stale content over the just-approved edit
-  setView("preview");
-  ftSetStatus("Approved — review Preview/Blocks, then mark Pass or Fail for this test.");
+  setView("preview"); // AI Editing and Manual Editing are separate tabs — this just switches, same as any tab click
+  ftSetStatus("Approved — review the diff, then mark Pass or Fail for this test.");
   ftSetVerdictButtons("awaiting_verdict");
   log("ok", `Test ${esc(tr.currentTest.id)}: approved — mark Pass or Fail when done reviewing.`);
 }

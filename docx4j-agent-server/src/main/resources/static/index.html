@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>docx4j Agent Console</title>
-  <link rel="stylesheet" href="style.css?v=10">
+  <link rel="stylesheet" href="style.css?v=11">
 </head>
 <body>
   <header class="topbar">
@@ -43,8 +43,8 @@
         <h2 id="doc-title">Select a document</h2>
         <div class="head-actions" id="doc-actions" hidden>
           <div class="view-tabs" id="view-tabs">
-            <button class="tab" data-view="blocks" id="tab-blocks" hidden>Blocks</button>
-            <button class="tab active" data-view="preview" id="tab-preview">Preview</button>
+            <button class="tab active" data-view="preview" id="tab-preview">AI Editing</button>
+            <button class="tab" data-view="word" id="tab-word">Manual Editing</button>
             <button class="tab" data-view="history" id="tab-history">History</button>
           </div>
           <span class="head-badge" id="head-badge" hidden title="Latest committed snapshot"></span>
@@ -57,20 +57,18 @@
         <span id="ft-banner-title"></span>
       </div>
       <p class="hint" id="index-hint">
-        Upload or pick a document on the left. It opens straight into a full Word-like
-        editor for direct manual edits — <b>select text, right-click &gt; Add comment</b>
-        to describe an edit, then pick it up with the <b>Comments…</b> button as AI focus.
-        Click <b>Back to AI Preview…</b> to see changes as a diff (green = new, blue =
-        modified) versus your last commit, and use <b>Commit</b>/<b>History</b> there to
-        save a milestone or roll back.
+        Upload or pick a document on the left. <b>AI Editing</b> shows the diff (green =
+        new, blue = modified) versus your last commit — Ctrl+click a paragraph to focus
+        it for the AI, or pick up a comment left in Manual Editing as focus via
+        <b>Comments…</b>. <b>Manual Editing</b> opens a full Word-like editor for direct
+        edits — select text, right-click &gt; Add comment to leave an instruction for
+        later. Switching between the two saves/reloads as needed (a few seconds) — they're
+        not meant to be used at the same time. <b>Commit</b>/<b>History</b> save a
+        milestone or roll back.
       </p>
       <div class="preview-wrap" id="preview-wrap" hidden>
         <div class="preview-loading" id="preview-loading">Rendering preview&#8230;</div>
         <iframe id="preview-frame" title="Document preview"></iframe>
-        <div class="onlyoffice-inline" id="onlyoffice-inline" hidden>
-          <div class="onlyoffice-inline-status" id="onlyoffice-inline-status" hidden></div>
-          <div id="onlyoffice-editor-container" class="onlyoffice-editor-container"></div>
-        </div>
         <div class="block-editor-overlay" id="block-editor-overlay" hidden>
           <div id="block-editor-mount"></div>
           <div class="block-editor-actions">
@@ -81,14 +79,13 @@
         <div class="preview-topbar" id="preview-topbar" hidden>
           <button type="button" class="preview-diff-summary-btn" id="preview-diff-summary"></button>
           <div class="preview-topbar-actions">
-            <button class="btn ghost sm" id="btn-edit-in-word" title="Switch this preview to a full Word-like editor for direct manual editing">Edit in Word&#8230;</button>
-            <button class="btn ghost sm" id="btn-word-comments" title="Select text in the Word editor, right-click &gt; Add comment with an instruction, then pick it up here as AI focus" hidden>Comments&#8230;</button>
+            <button class="btn ghost sm" id="btn-word-comments" title="Pick up a comment left in Manual Editing as AI focus">Comments&#8230;</button>
             <button class="btn ghost sm" id="btn-preview-commit-toggle">Commit&#8230;</button>
             <button class="btn ghost sm" id="btn-preview-history-toggle">History</button>
           </div>
         </div>
         <div class="word-comments-box" id="word-comments-box" hidden>
-          <div class="word-comments-hint">Comments left in the Word editor — click one to use it as AI focus:</div>
+          <div class="word-comments-hint">Comments left in Manual Editing — click one to use it as AI focus:</div>
           <div id="word-comments-list"></div>
         </div>
         <div class="preview-commit-box" id="preview-commit-box" hidden>
@@ -103,6 +100,10 @@
           <div class="preview-menu-head"><span class="tid" id="preview-menu-id"></span></div>
           <div class="preview-menu-actions" id="preview-menu-actions"></div>
         </div>
+      </div>
+      <div class="word-wrap" id="word-wrap" hidden>
+        <div class="onlyoffice-inline-status" id="onlyoffice-inline-status" hidden></div>
+        <div id="onlyoffice-editor-container" class="onlyoffice-editor-container"></div>
       </div>
       <div class="history-wrap" id="history-wrap" hidden>
         <div id="history-panel-mount"></div>
@@ -222,7 +223,7 @@
 
   <script src="recovery-ui.js?v=1"></script>
   <script src="block-editor.bundle.js?v=1"></script>
-  <script src="onlyoffice-editor.js?v=4"></script>
-  <script src="app.js?v=16"></script>
+  <script src="onlyoffice-editor.js?v=5"></script>
+  <script src="app.js?v=17"></script>
 </body>
 </html>
