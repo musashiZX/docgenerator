@@ -1,15 +1,32 @@
+target/
+!.mvn/wrapper/maven-wrapper.jar
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+.vscode/
 .env
-__pycache__/
-*.pyc
+*.log
+logs/
 .venv/
 venv/
-.idea/
-.vscode/
-logs/
+__pycache__/
+*.pyc
+
+# Working documents (uploaded/edited .docx) and their metadata/version-control
+# state live under docs/ at runtime — not part of the repo.
 *.doc
 *.docx
 *.pdf
-!docx4j-agent-server/src/test/resources/**/*.docx
+!src/test/resources/**/*.docx
+docs/*.docx
+docs/.meta/*.json
+docs/.meta/
+docs/.proposals/
+docs/.sessions/
+docs/.checkpoints/
+
 # Synthetic eval sample docs (no personal data) — keep tracked so the eval
 # suite runs on a fresh checkout. The real-CV samples stay excluded by the
 # blanket *.docx rule above: they were copied in from someone's actual
@@ -18,8 +35,24 @@ logs/
 !docs/samples/*.docx
 docs/samples/cv_*.docx
 
+# TipTap block-editor build tooling — node_modules only, keep src/build.mjs/
+# package.json and the built bundle (block-editor.bundle.js, served as a
+# static asset) tracked.
+editor-build/node_modules/
+
+# evals: keep scripts + catalogs, ignore run outputs
+evals/results/*.json
+!evals/results/.gitkeep
+
+# evals screenshots: 120+ generated PNGs (one per case, regenerable via the
+# eval runner) would bloat the repo — keep the manifest and a couple of
+# curated before/after examples for docs, ignore the rest.
+evals/screenshots/*.png
+!evals/screenshots/additives_before_after.png
+!evals/screenshots/full_before.png
+!evals/screenshots/full_after.png
+
 # Session/meeting notes and local tool config — not part of the product.
 Discussion.txt
 .claude/
 openAi_key.txt
-

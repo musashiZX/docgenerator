@@ -1,82 +1,74 @@
-# docGenerator chatbot
+# docx4j Agent Server
 
-A terminal chatbot powered by Claude Opus 4.7 — the same model behind Claude Code.
+An AI-powered Word document editor. Describe an edit in plain English; the AI
+proposes the exact change as a reviewable diff (via docx4j, targeting stable
+per-block bookmark IDs); you approve it before anything is saved. Every
+approved edit is versioned like git (commits, auto-checkpoints, restore,
+diff), so nothing is ever a one-way door.
 
-## Setup
-
-```bash
-cd C:/Users/chenz/Documents/docGenerator
-
-# 1. Create a virtual environment
-python -m venv .venv
-.venv\Scripts\activate     # Windows
-# source .venv/bin/activate  # macOS/Linux
-
-# 2. Install dependencies
-pip install -r requirements.txt
-
-# 3. Configure your API key
-copy .env.example .env     # Windows
-# cp .env.example .env       # macOS/Linux
-# then edit .env and paste your key from https://console.anthropic.com/
-```
+- **Using the app?** See **[USER_GUIDE.md](USER_GUIDE.md)** — functions,
+  how-to, a prompt cookbook with real tested examples, and the version-control
+  ("word-git") walkthrough.
+- **Checking accuracy/reliability?** See **[evals/README.md](evals/README.md)**
+  — the automated eval suite, current measured success rate, cost, and every
+  real bug it has found and fixed.
 
 ## Run
 
-### General chatbot
-
 ```bash
-python chatbot.py
+cp ../.env.example ../.env   # then fill in OPENAI_API_KEY or GEMINI_API_KEY (see USER_GUIDE.md)
+mvn spring-boot:run
 ```
 
-### Word document agent
+Open <http://localhost:8081>. Upload a `.docx` (or drop one into `docs/`),
+then use the AI chat panel to describe an edit.
 
-#### Web UI (recommended)
-
-```bash
-streamlit run app.py
-```
-
-Opens at http://localhost:8501. Pick or create a `.docx` in the sidebar, chat with the agent in the left panel, and edit the document on the right. The right panel has three tabs:
-
-- **Edit (WYSIWYG)** — a Word-like rich-text editor (headings, bold/italic/underline, bullet/numbered lists, blockquotes). Click **💾 Save** to write changes back to the `.docx`.
-- **Edit (structured)** — one row per paragraph with a text box and style dropdown. Useful for precise control or when WYSIWYG misbehaves.
-- **Preview** — read-only Word-styled render.
-- **Checklist** — audit the document against a set of checks (built-in default + custom). Two kinds of checks:
-  - **Structural** rules run locally and instantly: title present, headings have body text, no leftover TODOs, minimum word count, etc.
-  - **Content** rules ask the LLM to judge qualitative items ("intro states the purpose", "tone is consistent", "no obvious typos"). Click **▶️ Run checks** for both, or **⚡ Structural only** to skip the API call. Edit/add/remove items in the **Edit checklist** expander; the checklist is saved as a sidecar `<doc-name>.checklist.json`.
-
-Manual edits and chatbot edits both write to the same `.docx`; whichever saves last wins. Tables, images, and nested lists are not yet supported in manual editing. Click **Download .docx** in the sidebar to save the file locally. Documents live in the `docs/` folder.
-
-#### Command-line backends
+## Test
 
 ```bash
-# Anthropic Claude (paid, best quality)
-python doc_editor.py path/to/my-doc.docx
-
-# Google Gemini (free tier)
-python doc_editor_gemini.py path/to/my-doc.docx
-
-# Local Ollama (free, offline) - requires `ollama pull qwen2.5:7b` first
-python doc_editor_ollama.py path/to/my-doc.docx
+mvn test                                              # backend unit/integration tests
+python evals/run.py --catalog evals/catalog-engine.json   # deterministic eval tier, free, ~5s
+python evals/run.py                                        # LLM eval tier, needs a provider key
 ```
 
-The agent has tools to read paragraphs, append/insert/replace/delete paragraphs, set styles (e.g. `Heading 1`, `List Bullet`), and find-and-replace. Each edit is saved to disk immediately. Example prompts:
+## What's built
 
-- *"Add a title 'Quarterly Report' and a heading 'Summary' below it."*
-- *"Replace every 'Q1' with 'Q2'."*
-- *"Insert a bulleted list of three risks after paragraph 4."*
-- *"Read the doc and tell me what's in paragraph 7."*
+- **Editing**: modify, insert, delete (paragraphs and table rows/columns),
+  formatting (bold/italic/underline/size/align), bulk find-and-replace.
+- **AI chat**: a conversational session that refines one proposal across
+  multiple messages, plus a concurrent batch endpoint (`POST
+  /api/proposals/batch`) for running several independent edit requests in
+  parallel instead of one after another.
+- **Version control**: commits (named milestones), automatic checkpoints
+  (one per approved edit), restore, and a block-level diff between any two
+  snapshots.
+- **Edit in Word**: a second, manual editing surface — a full Word-like
+  WYSIWYG editor (self-hosted OnlyOffice Document Server) embedded right in
+  Preview, for direct edits alongside the AI chat flow. Manual edits show up
+  in the same diff/checkpoint/commit system as an AI-approved edit. See
+  `docs/ONLYOFFICE.md`.
+- **Performance**: the structural index and rendered preview are cached by
+  file version — repeat views are single-digit milliseconds; only an actual
+  edit pays the real recompute cost.
+- **Reliability**: a 60-case automated eval suite across 7 real and
+  synthetic documents (see `evals/`), plus ~180 backend unit/integration
+  tests.
 
-Commands inside either chat:
-- `exit` / `quit` — leave the session
-- `reset` — clear conversation history and start fresh
-- `Ctrl+C` — exit at any time
+## What's not built yet
 
-## How it works
+Image insert/editing, font-family changes, bulleted/numbered list-style
+toggles. See `USER_GUIDE.md` §6 for the current, maintained list.
 
-- **Model:** `claude-opus-4-7`
-- **Adaptive thinking:** Claude decides on its own when and how deeply to think.
-- **Streaming:** Tokens appear as they're generated.
-- **Multi-turn memory:** Full conversation history is sent on each turn so the bot remembers context until you `reset`.
-- **Tool use (doc agent):** The Word editor exposes `read_document`, `append_paragraph`, `insert_paragraph`, `set_paragraph`, `delete_paragraph`, and `replace_text` as Claude tools — same agent loop pattern as Claude Code.
+## Architecture notes
+
+- `com.docgen.mutation` — the deterministic engine: validates and applies a
+  mutation batch against a `WordprocessingMLPackage`, guarded by a
+  text-content hash check so an edit can never silently touch an unrelated
+  block.
+- `com.docgen.llm` — turns a natural-language request into a mutation batch
+  via an OpenAI-compatible chat/completions endpoint (OpenAI or Gemini).
+- `com.docgen.proposal` / `com.docgen.conversation` — the propose → review →
+  approve workflow and the chat session layer on top of it.
+- `com.docgen.recovery` — commits, checkpoints, restore, diff.
+- `com.docgen.document` — load/save, structural indexing, HTML preview
+  rendering, and the file-version cache.
