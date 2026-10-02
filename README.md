@@ -16,12 +16,21 @@ diff), so nothing is ever a one-way door.
 ## Run
 
 ```bash
-cp ../.env.example ../.env   # then fill in OPENAI_API_KEY or GEMINI_API_KEY (see USER_GUIDE.md)
+cp .env.example .env   # then fill in OPENAI_API_KEY or GEMINI_API_KEY (see USER_GUIDE.md)
 mvn spring-boot:run
 ```
 
 Open <http://localhost:8081>. Upload a `.docx` (or drop one into `docs/`),
 then use the AI chat panel to describe an edit.
+
+Manual Editing (the embedded Word-like editor) additionally needs a
+self-hosted OnlyOffice Document Server:
+
+```bash
+docker compose -f docker/onlyoffice-compose.yml up -d
+```
+
+See `docs/ONLYOFFICE.md` for details; the AI chat flow works without it.
 
 ## Test
 
@@ -42,11 +51,13 @@ python evals/run.py                                        # LLM eval tier, need
 - **Version control**: commits (named milestones), automatic checkpoints
   (one per approved edit), restore, and a block-level diff between any two
   snapshots.
-- **Edit in Word**: a second, manual editing surface — a full Word-like
-  WYSIWYG editor (self-hosted OnlyOffice Document Server) embedded right in
-  Preview, for direct edits alongside the AI chat flow. Manual edits show up
-  in the same diff/checkpoint/commit system as an AI-approved edit. See
-  `docs/ONLYOFFICE.md`.
+- **Manual Editing**: a second tab alongside AI Editing — a full Word-like
+  WYSIWYG editor (self-hosted OnlyOffice Document Server) for direct edits.
+  The two tabs are deliberately separate (not meant to be used at the same
+  time); switching between them syncs whatever changed in the other. Select
+  text and leave a comment to hand it to the AI as focus next time you
+  switch to AI Editing. Manual edits show up in the same diff/checkpoint
+  /commit system as an AI-approved edit. See `docs/ONLYOFFICE.md`.
 - **Performance**: the structural index and rendered preview are cached by
   file version — repeat views are single-digit milliseconds; only an actual
   edit pays the real recompute cost.

@@ -5,7 +5,7 @@ proposes the exact change as a reviewable diff — you approve it, or keep
 refining it in chat, before anything is saved. Every edit is versioned like
 git, so nothing is ever truly lost.
 
-- App: `http://localhost:8081` (after `mvn spring-boot:run` in `docx4j-agent-server/`)
+- App: `http://localhost:8081` (after `mvn spring-boot:run` from the repo root)
 - Status: internal tool, standalone (not yet integrated into the main DoQcheck app)
 
 ---
@@ -228,7 +228,7 @@ separately:
 (`gemini-3.5-flash-lite`) — a few thousand tokens of the document's
 structure plus your prompt. Multi-part requests (several table rows at
 once) run a bit higher, still under a cent. See
-`docx4j-agent-server/evals/README.md` for how this is measured.
+`evals/README.md` for how this is measured.
 
 **Speed:**
 
