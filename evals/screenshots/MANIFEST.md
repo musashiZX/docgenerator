@@ -74,3 +74,26 @@ verified present on disk against the 60 case ids in `evals/catalog.json`
 with no gaps or duplicates. Plus 3 pre-existing demo screenshots
 (`additives_before_after.png`, `full_before.png`, `full_after.png`) from
 the original manual GUANGDELI walkthrough — 123 PNGs total in this directory.
+
+## `branch-verify_*` — standalone-branch smoke test (2026-10-02)
+
+Not an eval case — a manual round-trip check that `doc-generator-AI-manual`
+actually works after the flatten/cleanup commits, run against a fresh
+`git clone` into a new local folder (not the working copy the cleanup was
+done in), with the OnlyOffice Document Server and the app started from
+that clone.
+
+| Screenshot | What it shows |
+|---|---|
+| `branch-verify_ai-editing_before.jpg` | `it_purchase_order.docx` freshly uploaded, AI Editing tab, baseline `Department: Cloud Infrastructure`. |
+| `branch-verify_ai-editing_after-approve.jpg` | After prompting "Change the Department from Cloud Infrastructure to Network Infrastructure" and clicking **Approve & save** — diff applied, `1 modified · 0 added · 0 removed since HEAD`. |
+| `branch-verify_manual-editing_before.jpg` | Switched to the Manual Editing tab — OnlyOffice loads the same document and already shows `Network Infrastructure`, confirming the AI edit carried over. |
+| `branch-verify_manual-editing_after-edit.jpg` | Directly edited the PO number in OnlyOffice (`PO-2026-04417` → `PO-2026-04418`). |
+| `branch-verify_ai-editing_after-sync-from-manual.jpg` | Switched back to AI Editing — forcesave ran automatically, both edits now show: `2 modified · 0 added · 0 removed since HEAD`, with the new PO number and Department both present. |
+
+Confirms: `mvn compile` / `mvn test` clean on the fresh clone, the app boots
+and serves the UI, the AI propose → approve → save pipeline works, the
+OnlyOffice Manual Editing surface loads and round-trips through the
+app's own save endpoint, and the two tabs sync correctly in both
+directions (AI → Manual, Manual → AI) — the behavior the two-separate
+-tabs redesign depends on.
